@@ -50,11 +50,7 @@ from scripts.eval.core.preflight import (  # noqa: E402
 )
 from scripts.eval.core.metrics import sibling_failure_stats  # noqa: E402
 from scripts.eval.core.records import build_per_query_record, normalize_worker_payload  # noqa: E402
-from scripts.eval.core.runner import (  # noqa: E402
-    categorise_error,
-    is_retryable,
-    retry_backoff,
-)
+from scripts.eval.core.runner import categorise_error  # noqa: E402
 
 
 TESTSET_FILE = REPO_ROOT / "data/validated_testset.pkl"
@@ -89,18 +85,44 @@ def combo_key(system: str, granularity: str, embedding_model: str,
     )
 
 
-def invoke_vector_worker(
+_BATCH_END_SENTINEL = "--DONE--"
+
+
+def _combo_timeout_seconds(queries_count: int, per_query_budget_s: int) -> int:
+    """Compute a generous combo-wide subprocess timeout.
+
+    Model load happens once per worker process (~30-60s on cold disk, ~10-15s
+    warm). Per-query retrieval is ~3-8s for none/bge rerank, ~10-20s for qwen3.
+    The orchestrator passes per_query_budget_s as the user-visible knob; we
+    convert it to a total combo budget that includes one model-load reservation.
+    """
+    model_load_budget = 180  # 3 minutes for cold model download + GPU load
+    return max(model_load_budget + per_query_budget_s * queries_count, 600)
+
+
+def invoke_vector_worker_batch(
     repo_root: Path,
     system: str,
     granularity: str,
     embedding_model: str,
     reranker: str,
-    query: str,
+    queries: list[tuple[str, dict]],
     top_k: int,
-    timeout_s: int,
+    per_query_timeout_s: int,
     qdrant_path: str | None,
-) -> tuple[dict | None, str, str]:
-    """Invoke vector_worker.py in a fresh subprocess with isolated env vars."""
+) -> tuple[dict[str, dict], str, str, str | None]:
+    """Spawn one worker subprocess per combo, pipe all queries via stdin.
+
+    The worker keeps the embedding model (and optional reranker) loaded across
+    every query in the batch, eliminating the per-query model-reload overhead
+    that previously dominated wall time.
+
+    Returns:
+        (payload_by_qid, stdout_text, stderr_text, fatal_error). `fatal_error`
+        is None on a clean run, or a short string when the subprocess itself
+        died (timeout, non-zero exit before producing any payload). Per-query
+        worker errors live inside each payload's ``ok`` flag.
+    """
     import subprocess
 
     cmd = [
@@ -110,83 +132,78 @@ def invoke_vector_worker(
         "--granularity", granularity,
         "--embedding-model", embedding_model,
         "--reranker", reranker,
-        "--query", query,
         "--top-k", str(top_k),
     ]
     if qdrant_path:
         cmd += ["--qdrant-path", qdrant_path]
+
+    stdin_lines = [
+        json.dumps({"qid": qid, "query": item["query"], "top_k": top_k},
+                   ensure_ascii=False)
+        for qid, item in queries
+    ]
+    stdin_lines.append(_BATCH_END_SENTINEL)
+    stdin_text = "\n".join(stdin_lines) + "\n"
+
+    total_timeout = _combo_timeout_seconds(len(queries), per_query_timeout_s)
     try:
         proc = subprocess.run(
             cmd,
+            input=stdin_text,
             cwd=repo_root,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=timeout_s,
+            timeout=total_timeout,
+        )
+        stdout = proc.stdout or ""
+        stderr = (proc.stderr or "").strip()
+        fatal = None if proc.returncode == 0 else (
+            stderr or f"Worker exited with code {proc.returncode}"
         )
     except subprocess.TimeoutExpired as exc:
-        stdout = (exc.stdout or "").strip() if isinstance(exc.stdout, str) else ""
+        stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
         stderr = (exc.stderr or "").strip() if isinstance(exc.stderr, str) else ""
-        return (
-            {"ok": False, "system": system, "granularity": granularity,
-             "embedding_model": embedding_model, "reranker": reranker,
-             "error": f"Worker timed out after {timeout_s}s"},
-            stdout, stderr,
-        )
+        fatal = f"Worker batch timed out after {total_timeout}s"
 
-    stdout = (proc.stdout or "").strip()
-    stderr = (proc.stderr or "").strip()
-    if not stdout:
-        return None, stdout, stderr or f"Worker exited with code {proc.returncode}"
-    try:
-        payload = json.loads(stdout.splitlines()[-1])
-    except json.JSONDecodeError:
-        return None, stdout, stderr or "Worker output was not valid JSON"
-    return payload, stdout, stderr
+    payload_by_qid: dict[str, dict] = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        qid = payload.get("qid")
+        if qid:
+            payload_by_qid[qid] = payload
+
+    return payload_by_qid, stdout, stderr, fatal
 
 
-def run_one_query_with_retry(
-    *, repo_root: Path, system: str, granularity: str, embedding_model: str,
-    reranker: str, qid: str, item: dict, top_k: int, cutoffs: list[int],
-    worker_timeout_s: int, max_retries: int, qdrant_path: str | None,
-    logger: ProgressLogger,
-) -> tuple[dict, float]:
-    """Execute one vector retrieval call, retrying transient errors."""
-    retry_count = 0
+def build_record_from_payload(
+    *, qid: str, item: dict, system: str, granularity: str,
+    embedding_model: str, reranker: str, cutoffs: list[int],
+    payload: dict | None, worker_stdout: str, worker_stderr: str,
+) -> dict:
+    """Wrap one payload (or a missing payload) into the per-query record schema."""
+    normalized = normalize_worker_payload(payload)
+    err = normalized.get("error", "")
     error_category = ""
-    total_t0 = time.time()
-    while True:
-        payload, stdout_text, stderr_text = invoke_vector_worker(
-            repo_root, system, granularity, embedding_model, reranker,
-            item["query"], top_k, worker_timeout_s, qdrant_path,
-        )
-        normalized = normalize_worker_payload(payload)
-        err = normalized.get("error", "")
-        if not err and normalized.get("worker_ok"):
-            error_category = ""
-            break
-        error_category = categorise_error(err or stderr_text or "")
-        if retry_count >= max_retries or not is_retryable(error_category):
-            break
-        retry_count += 1
-        wait = retry_backoff(error_category, retry_count)
-        logger.info(
-            f"  .. {qid} transient error ({error_category}), retry {retry_count}/"
-            f"{max_retries} after {wait:.0f}s"
-        )
-        time.sleep(wait)
+    if err or not normalized.get("worker_ok"):
+        error_category = categorise_error(err or worker_stderr or "")
 
-    elapsed = time.time() - total_t0
     record = build_per_query_record(
         qid=qid, item=item, system=system, granularity=granularity,
         cutoffs=cutoffs, normalized=normalized,
-        worker_stdout=stdout_text, worker_stderr=stderr_text,
-        retry_count=retry_count, error_category=error_category,
+        worker_stdout=worker_stdout, worker_stderr=worker_stderr,
+        retry_count=0, error_category=error_category,
     )
     record["embedding_model"] = embedding_model
     record["reranker"] = reranker
-    return record, elapsed
+    return record
 
 
 def build_config(args, label: str, selected_queries: list, cutoffs: list[int]) -> dict:
@@ -424,27 +441,54 @@ def main() -> int:  # noqa: C901
                     combo_records: list[dict] = []
                     if completed:
                         combo_records.extend(eval_io.read_records_file(combo_path, validate=True))
+
+                    pending = [(qid, item) for qid, item in selected_queries
+                               if qid not in completed]
                     try:
-                        for qid, item in selected_queries:
-                            if qid in completed:
-                                continue
-                            record, elapsed = run_one_query_with_retry(
-                                repo_root=REPO_ROOT, system=system, granularity=granularity,
-                                embedding_model=embedding_model, reranker=reranker,
-                                qid=qid, item=item,
-                                top_k=args.top_k, cutoffs=cutoffs,
-                                worker_timeout_s=args.worker_timeout_s,
-                                max_retries=args.max_retries, qdrant_path=args.qdrant_path,
-                                logger=logger,
+                        if pending:
+                            payload_by_qid, stdout_text, stderr_text, fatal = (
+                                invoke_vector_worker_batch(
+                                    repo_root=REPO_ROOT, system=system,
+                                    granularity=granularity,
+                                    embedding_model=embedding_model,
+                                    reranker=reranker, queries=pending,
+                                    top_k=args.top_k,
+                                    per_query_timeout_s=args.worker_timeout_s,
+                                    qdrant_path=args.qdrant_path,
+                                )
                             )
-                            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-                            fh.flush()
-                            combo_records.append(record)
-                            logger.query_line(record, elapsed)
-                            if record.get("error"):
-                                cat = record.get("error_category", "other") or "other"
-                                error_categories[cat] = error_categories.get(cat, 0) + 1
-                            time.sleep(LLM_INTER_QUERY_DELAY_S)
+                            if fatal:
+                                logger.warn(f"  batch worker failed: {fatal[:300]}")
+                            for qid, item in pending:
+                                payload = payload_by_qid.get(qid)
+                                if payload is None and fatal:
+                                    payload = {
+                                        "ok": False,
+                                        "error": fatal,
+                                        "system": system,
+                                        "granularity": granularity,
+                                        "embedding_model": embedding_model,
+                                        "reranker": reranker,
+                                    }
+                                record = build_record_from_payload(
+                                    qid=qid, item=item, system=system,
+                                    granularity=granularity,
+                                    embedding_model=embedding_model,
+                                    reranker=reranker, cutoffs=cutoffs,
+                                    payload=payload,
+                                    worker_stdout=stdout_text,
+                                    worker_stderr=stderr_text,
+                                )
+                                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                                fh.flush()
+                                combo_records.append(record)
+                                elapsed_q = (record.get("metrics") or {}).get(
+                                    "elapsed_s", 0.0
+                                )
+                                logger.query_line(record, elapsed_q)
+                                if record.get("error"):
+                                    cat = record.get("error_category", "other") or "other"
+                                    error_categories[cat] = error_categories.get(cat, 0) + 1
                     finally:
                         fh.close()
 
