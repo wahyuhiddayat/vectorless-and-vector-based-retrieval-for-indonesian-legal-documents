@@ -22,10 +22,20 @@ _ce_model_cache: dict = {}
 
 
 def _get_cross_encoder(model_id: str):
-    """Load and cache a sentence-transformers CrossEncoder model."""
+    """Load and cache a sentence-transformers CrossEncoder model.
+
+    Loaded in bfloat16 when CUDA is available to halve VRAM. Qwen3-Reranker-0.6B
+    in fp32 OOMs on a 24 GB L4 because the embedding model is still cached in
+    VRAM from first-stage retrieval. bf16 fits comfortably with no quality impact
+    on transformer reranker inference, and L4 has native bf16 tensor-core support.
+    """
     if model_id not in _ce_model_cache:
+        import torch
         from sentence_transformers import CrossEncoder
-        _ce_model_cache[model_id] = CrossEncoder(model_id)
+        ce = CrossEncoder(model_id)
+        if torch.cuda.is_available():
+            ce.model = ce.model.to(dtype=torch.bfloat16)
+        _ce_model_cache[model_id] = ce
     return _ce_model_cache[model_id]
 
 
