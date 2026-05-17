@@ -24,17 +24,29 @@ _ce_model_cache: dict = {}
 def _get_cross_encoder(model_id: str):
     """Load and cache a sentence-transformers CrossEncoder model.
 
-    Loaded in bfloat16 when CUDA is available to halve VRAM. Qwen3-Reranker-0.6B
-    in fp32 OOMs on a 24 GB L4 because the embedding model is still cached in
-    VRAM from first-stage retrieval. bf16 fits comfortably with no quality impact
-    on transformer reranker inference, and L4 has native bf16 tensor-core support.
+    Loaded in bfloat16 weights when CUDA is available to halve VRAM.
+    Qwen3-Reranker-0.6B in fp32 OOMs on a 24 GB L4 because the embedding model
+    stays cached in VRAM from first-stage retrieval. bf16 fits comfortably with
+    no quality impact on transformer reranker inference, and L4 has native bf16
+    tensor-core support.
+
+    We pass torch_dtype via model_kwargs to AutoModel rather than calling
+    `model.to(dtype=bf16)` after construction. The post-hoc cast incorrectly
+    coerces the embedding layer's index pipeline as well, producing
+    "embedding(): argument 'indices' must be Tensor" at the first forward pass
+    on Qwen3-Reranker. model_kwargs only sets weight dtype, leaving input
+    handling intact.
     """
     if model_id not in _ce_model_cache:
         import torch
         from sentence_transformers import CrossEncoder
-        ce = CrossEncoder(model_id)
         if torch.cuda.is_available():
-            ce.model = ce.model.to(dtype=torch.bfloat16)
+            ce = CrossEncoder(
+                model_id,
+                model_kwargs={"torch_dtype": torch.bfloat16},
+            )
+        else:
+            ce = CrossEncoder(model_id)
         _ce_model_cache[model_id] = ce
     return _ce_model_cache[model_id]
 
