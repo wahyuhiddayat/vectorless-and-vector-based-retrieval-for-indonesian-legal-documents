@@ -99,12 +99,27 @@ _RERANKER_REGISTRY: dict[str, dict] = {
 }
 
 
+_qdrant_client_cache = None
+
+
 def get_qdrant_client():
-    """Return a Qdrant client for local-path or server mode."""
+    """Return a Qdrant client for local-path or server mode.
+
+    Cached at module level. qdrant-client local mode (`QdrantClient(path=...)`)
+    eagerly loads every collection found in the path into memory on instantiation,
+    a process that is single-threaded Python and runs into tens of minutes for the
+    full 9-collection RQ2 index. Without this cache, the eval worker constructs a
+    new client on every query and re-pays that cost 285 times per combo.
+    """
+    global _qdrant_client_cache
+    if _qdrant_client_cache is not None:
+        return _qdrant_client_cache
     from qdrant_client import QdrantClient
     if QDRANT_PATH:
-        return QdrantClient(path=QDRANT_PATH)
-    return QdrantClient(url=QDRANT_URL)
+        _qdrant_client_cache = QdrantClient(path=QDRANT_PATH)
+    else:
+        _qdrant_client_cache = QdrantClient(url=QDRANT_URL)
+    return _qdrant_client_cache
 
 
 _st_model_cache: dict = {}
