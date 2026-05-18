@@ -80,12 +80,21 @@ _RERANKER_REGISTRY: dict[str, dict] = {
         # Indonesian seen via MIRACL-id training mixture.
         "model_id": "BAAI/bge-reranker-v2-m3",
         "backend": "cross_encoder",
+        # Encoder, ~2 GB bf16 weights, padded to longest in batch. 128 fits on L4.
+        "predict_batch_size": 128,
     },
     "qwen3-reranker-0.6b": {
         # R2. Decoder LLM pointwise yes/no logit. Qwen3-0.6B, Apache-2.0, 32K ctx.
         # Use the seq-cls conversion checkpoint for sentence-transformers CrossEncoder API.
         "model_id": "tomaarsen/Qwen3-Reranker-0.6B-seq-cls",
         "backend": "cross_encoder",
+        # Decoder LLM: KV-cache + activations scale with batch * seqlen. Cross-encoder
+        # pads to longest pair in the batch, so a single long passage in a batch of 128
+        # OOMs on L4 even though the model itself is small. 16 is safe and still ~3x
+        # faster than the sentence-transformers default of 32 once amortized over the
+        # whole combo (since the bottleneck on small batches is launch overhead, not
+        # compute).
+        "predict_batch_size": 16,
     },
 }
 

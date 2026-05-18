@@ -85,10 +85,11 @@ def rerank(query: str, candidates: list[dict], reranker_name: str,
     if cfg["backend"] == "cross_encoder":
         ce = _get_cross_encoder(cfg["model_id"])
         pairs = [(query, c["text"]) for c in candidates]
-        # batch_size=128 tuned for A100 40GB. Cross-encoder pair memory is well
-        # under 1 MB at 512 tokens, so 128 fits with room to spare. Default 32
-        # is conservative for 12 GB GPUs and bottlenecks the reranker stage.
-        scores = ce.predict(pairs, batch_size=128, show_progress_bar=False)
+        # Per-model batch size from the registry. Encoder rerankers tolerate large
+        # batches; decoder-LLM rerankers OOM on L4 above ~16 because activations
+        # scale with batch * pad-to-longest-seqlen.
+        batch_size = cfg.get("predict_batch_size", 32)
+        scores = ce.predict(pairs, batch_size=batch_size, show_progress_bar=False)
         scored = [(float(s), c) for s, c in zip(scores, candidates)]
         scored.sort(key=lambda x: x[0], reverse=True)
         out = []
