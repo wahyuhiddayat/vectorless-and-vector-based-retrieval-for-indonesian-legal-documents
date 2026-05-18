@@ -116,6 +116,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Abort on pre-flight failures (missing index, Gemini unreachable)")
     ap.add_argument("--self-test-metrics", action="store_true",
                     help="Run synthetic metric checks and exit")
+    ap.add_argument(
+        "--query-expansion",
+        type=str,
+        default=None,
+        help="Path to a pre-computed query expansion cache JSON. "
+             "Run scripts/eval/expand_queries.py to produce one. When set, "
+             "the expanded query text replaces the original at retrieval time.",
+    )
     return ap
 
 
@@ -184,6 +192,35 @@ def main() -> int:
         system_timeouts = {s: PER_SYSTEM_TIMEOUT_S.get(s, PROCESS_TIMEOUT_S) for s in systems}
         fallback_timeout = PROCESS_TIMEOUT_S
 
+    query_overrides: dict[str, str] | None = None
+    query_expansion_meta: dict | None = None
+    if args.query_expansion:
+        if not args.split:
+            raise SystemExit(
+                "--query-expansion requires --split to verify the cache "
+                "fingerprint matches the evaluated split."
+            )
+        expansion_path = Path(args.query_expansion)
+        try:
+            query_overrides = eval_io.load_query_expansion(
+                expansion_path, eval_io.split_fingerprint(args.split)
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise SystemExit(str(exc))
+        query_expansion_meta = eval_io.query_expansion_fingerprint(expansion_path)
+        missing = [qid for qid, _ in selected_queries if qid not in query_overrides]
+        if missing:
+            print(
+                f"  query expansion missing for {len(missing)} qids, "
+                f"falling back to original query text for those."
+            )
+        print(
+            f"Using query expansion, path={expansion_path} "
+            f"sha256={query_expansion_meta.get('sha256_16')} "
+            f"prompt={query_expansion_meta.get('prompt_version')} "
+            f"n={query_expansion_meta.get('num_queries')}"
+        )
+
     runner = EvalRunner(
         repo_root=REPO_ROOT,
         worker_script=WORKER_SCRIPT,
@@ -209,6 +246,8 @@ def main() -> int:
         run_kind="vectorless",
         split=args.split,
         parallel_combos=parallel_combos,
+        query_overrides=query_overrides,
+        query_expansion_meta=query_expansion_meta,
     )
 
     runner.preflight()

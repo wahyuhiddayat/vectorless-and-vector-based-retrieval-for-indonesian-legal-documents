@@ -68,6 +68,64 @@ def split_fingerprint(split: str, splits_dir: Path | None = None) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def load_query_expansion(path: Path, expected_split_fingerprint: str) -> dict[str, str]:
+    """Load expanded queries from cache, validate split fingerprint.
+
+    Returns dict qid to expanded_query_text. Raises FileNotFoundError if the
+    cache is missing, ValueError if the cache was built for a different split
+    (guards against accidental cross-split contamination).
+
+    Args:
+        path: Path to the expansion JSON file (typically
+            data/query_expansion/<split>_expanded.json).
+        expected_split_fingerprint: Sha256 of the qid list for the split the
+            eval is about to run. Must match the fingerprint stored in the
+            cache metadata.
+
+    Returns:
+        Mapping qid to expanded query text.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Query expansion cache not found, {path}. "
+            f"Run python scripts/eval/expand_queries.py --split <split>"
+        )
+    with open(path, "r", encoding="utf-8") as f:
+        cache = json.load(f)
+    cache_fp = cache.get("metadata", {}).get("split_fingerprint")
+    if cache_fp != expected_split_fingerprint:
+        raise ValueError(
+            f"Query expansion cache split fingerprint mismatch. "
+            f"cache={(cache_fp or 'none')[:16]} eval={expected_split_fingerprint[:16]}. "
+            f"Re-compute the expansion cache for the current split."
+        )
+    return {qid: data["expanded"] for qid, data in cache["queries"].items()}
+
+
+def query_expansion_fingerprint(path: Path) -> dict:
+    """Return cache metadata plus content sha256 for config.json recording.
+
+    Args:
+        path: Path to the expansion JSON file.
+
+    Returns:
+        Dict with path, sha256 of the file contents, prompt version, model
+        name, and query count. Used by eval orchestrators to record exactly
+        which expansion cache was used for reproducibility.
+    """
+    with open(path, "rb") as f:
+        sha = hashlib.sha256(f.read()).hexdigest()
+    with open(path, "r", encoding="utf-8") as f:
+        meta = json.load(f).get("metadata", {})
+    return {
+        "path": str(path),
+        "sha256_16": sha[:16],
+        "prompt_version": meta.get("prompt_version"),
+        "model": meta.get("model"),
+        "num_queries": meta.get("num_queries"),
+    }
+
+
 def select_queries(
     testset: dict[str, dict],
     doc_id: str | None,

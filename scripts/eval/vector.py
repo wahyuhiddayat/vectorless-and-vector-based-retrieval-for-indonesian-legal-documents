@@ -110,12 +110,20 @@ def invoke_vector_worker_batch(
     top_k: int,
     per_query_timeout_s: int,
     qdrant_path: str | None,
+    query_overrides: dict[str, str] | None = None,
 ) -> tuple[dict[str, dict], str, str, str | None]:
     """Spawn one worker subprocess per combo, pipe all queries via stdin.
 
     The worker keeps the embedding model (and optional reranker) loaded across
     every query in the batch, eliminating the per-query model-reload overhead
     that previously dominated wall time.
+
+    Args:
+        query_overrides: Optional mapping qid to alternative query text. When
+            provided, the alternative text is sent to the worker instead of
+            ``item["query"]``. Used by the --query-expansion flag to feed
+            LLM-expanded queries downstream. When None, original queries flow
+            through unchanged.
 
     Returns:
         (payload_by_qid, stdout_text, stderr_text, fatal_error). `fatal_error`
@@ -137,9 +145,16 @@ def invoke_vector_worker_batch(
     if qdrant_path:
         cmd += ["--qdrant-path", qdrant_path]
 
+    overrides = query_overrides or {}
     stdin_lines = [
-        json.dumps({"qid": qid, "query": item["query"], "top_k": top_k},
-                   ensure_ascii=False)
+        json.dumps(
+            {
+                "qid": qid,
+                "query": overrides.get(qid, item["query"]),
+                "top_k": top_k,
+            },
+            ensure_ascii=False,
+        )
         for qid, item in queries
     ]
     stdin_lines.append(_BATCH_END_SENTINEL)
@@ -209,6 +224,9 @@ def build_record_from_payload(
 def build_config(args, label: str, selected_queries: list, cutoffs: list[int]) -> dict:
     """Snapshot the run configuration for write + resume diff."""
     split_fp = eval_io.split_fingerprint(args.split) if args.split else None
+    expansion_meta = None
+    if args.query_expansion:
+        expansion_meta = eval_io.query_expansion_fingerprint(Path(args.query_expansion))
     return {
         "run_kind": "vector",
         "label": label,
@@ -235,6 +253,7 @@ def build_config(args, label: str, selected_queries: list, cutoffs: list[int]) -
         "qdrant_path": args.qdrant_path,
         "qdrant_url": None,
         "llm_model": gemini_model_name(),
+        "query_expansion": expansion_meta,
         "notes": {
             "single_gold_gt": True,
         },
@@ -245,6 +264,7 @@ _RESUME_SIGNATURE_KEYS = (
     "run_kind", "testset_file", "systems", "granularities",
     "embedding_models", "rerankers", "top_k", "cutoffs", "doc_id",
     "query_limit", "random_seed", "split", "split_fingerprint",
+    "query_expansion",
 )
 
 
@@ -309,6 +329,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--strict", action="store_true",
                     help="Abort on pre-flight failures (missing index, Qdrant unreachable)")
+    ap.add_argument(
+        "--query-expansion",
+        type=str,
+        default=None,
+        help="Path to a pre-computed query expansion cache JSON. "
+             "Run scripts/eval/expand_queries.py to produce one. When set, "
+             "the expanded query text replaces the original at retrieval time.",
+    )
     return ap
 
 
@@ -397,6 +425,33 @@ def main() -> int:  # noqa: C901
         if args.strict:
             return 2
 
+    query_overrides: dict[str, str] = {}
+    if args.query_expansion:
+        if not args.split:
+            raise SystemExit(
+                "--query-expansion requires --split to verify the cache "
+                "fingerprint matches the evaluated split."
+            )
+        expansion_path = Path(args.query_expansion)
+        try:
+            query_overrides = eval_io.load_query_expansion(
+                expansion_path, eval_io.split_fingerprint(args.split)
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise SystemExit(str(exc))
+        missing = [qid for qid, _ in selected_queries if qid not in query_overrides]
+        if missing:
+            logger.warn(
+                f"  query expansion missing for {len(missing)} qids, "
+                f"falling back to original query text for those."
+            )
+        meta = config.get("query_expansion") or {}
+        logger.ok(
+            f"Using query expansion, path={expansion_path} "
+            f"sha256={meta.get('sha256_16')} prompt={meta.get('prompt_version')} "
+            f"n={meta.get('num_queries')}"
+        )
+
     if args.resume:
         validate_resume_config(run_dir, config, logger)
 
@@ -455,6 +510,7 @@ def main() -> int:  # noqa: C901
                                     top_k=args.top_k,
                                     per_query_timeout_s=args.worker_timeout_s,
                                     qdrant_path=args.qdrant_path,
+                                    query_overrides=query_overrides or None,
                                 )
                             )
                             if fatal:

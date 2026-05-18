@@ -155,6 +155,7 @@ def _run_one_query_with_retry_standalone(
     cutoffs: list[int],
     timeout_s: int,
     max_retries: int,
+    query_text_override: str | None = None,
 ) -> tuple[dict, float, list[str]]:
     """Run one query with retry, return (record, elapsed_s, log_lines).
 
@@ -162,16 +163,22 @@ def _run_one_query_with_retry_standalone(
     the `self` dependency, so this is picklable for ProcessPoolExecutor.
     Retry log messages are accumulated in `log_lines` for the parent to
     flush in combo order.
+
+    Args:
+        query_text_override: Alternative query text to send to the worker.
+            When None, ``item["query"]`` flows through unchanged. Used by
+            the --query-expansion flag to feed LLM-expanded queries.
     """
     retry_count = 0
     error_category = ""
     log_lines: list[str] = []
     total_t0 = time.time()
 
+    query_for_retrieval = query_text_override if query_text_override is not None else item["query"]
     while True:
         payload, worker_stdout, worker_stderr = invoke_worker(
             worker_script, repo_root, system, granularity,
-            item["query"], top_k, timeout_s,
+            query_for_retrieval, top_k, timeout_s,
         )
         normalized = normalize_worker_payload(payload)
         err = normalized.get("error", "")
@@ -214,6 +221,7 @@ def _execute_one_combo(
     llm_systems: set[str],
     inter_query_delay_s: float,
     resume: bool,
+    query_overrides: dict[str, str] | None = None,
 ) -> dict:
     """Execute one (system, granularity) combo as a standalone unit.
 
@@ -255,11 +263,13 @@ def _execute_one_combo(
         for qid, item in selected_queries:
             if qid in completed:
                 continue
+            override = (query_overrides or {}).get(qid)
             record, elapsed, retry_log = _run_one_query_with_retry_standalone(
                 repo_root=repo_root, worker_script=worker_script,
                 system=system, granularity=granularity, qid=qid, item=item,
                 top_k=top_k, cutoffs=cutoffs, timeout_s=timeout_s,
                 max_retries=max_retries,
+                query_text_override=override,
             )
             log_lines.extend(retry_log)
             combo_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
@@ -322,6 +332,8 @@ class EvalRunner:
         split: str | None = None,
         system_timeouts: dict[str, int] | None = None,
         parallel_combos: int = 1,
+        query_overrides: dict[str, str] | None = None,
+        query_expansion_meta: dict | None = None,
     ):
         self.repo_root = repo_root
         self.worker_script = worker_script
@@ -350,6 +362,8 @@ class EvalRunner:
         self.run_kind = run_kind
         self.split = split
         self.parallel_combos = max(1, parallel_combos)
+        self.query_overrides = query_overrides or None
+        self.query_expansion_meta = query_expansion_meta
 
         self.logger = ProgressLogger(run_dir / "progress.log")
         self.started_at = datetime.now()
@@ -386,6 +400,7 @@ class EvalRunner:
             "qdrant_path": self.qdrant_path,
             "qdrant_url": self.qdrant_url,
             "llm_model": gemini_model_name(),
+            "query_expansion": self.query_expansion_meta,
             "notes": {
                 "single_gold_gt": True,
                 "metric_redundancy": "recall@k == hit@k, map@k == mrr@k for single-gold GT",
@@ -400,7 +415,7 @@ class EvalRunner:
         keys = (
             "run_kind", "testset_file", "systems", "granularities",
             "top_k", "cutoffs", "doc_id", "query_limit", "random_seed",
-            "split", "split_fingerprint",
+            "split", "split_fingerprint", "query_expansion",
         )
         return {k: cfg.get(k) for k in keys}
 
@@ -542,6 +557,7 @@ class EvalRunner:
             llm_systems=self.llm_systems,
             inter_query_delay_s=self.inter_query_delay_s,
             resume=self.resume,
+            query_overrides=self.query_overrides,
         )
 
     def _absorb_combo_result(self, result: dict) -> None:
