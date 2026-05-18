@@ -41,6 +41,9 @@ def _get_cross_encoder(model_id: str):
         import torch
         from sentence_transformers import CrossEncoder
         if torch.cuda.is_available():
+            # Free VRAM fragmentation from the first-stage embedding model before
+            # the reranker arena claims its slab. Cheap insurance on smaller GPUs.
+            torch.cuda.empty_cache()
             ce = CrossEncoder(
                 model_id,
                 model_kwargs={"torch_dtype": torch.bfloat16},
@@ -82,7 +85,10 @@ def rerank(query: str, candidates: list[dict], reranker_name: str,
     if cfg["backend"] == "cross_encoder":
         ce = _get_cross_encoder(cfg["model_id"])
         pairs = [(query, c["text"]) for c in candidates]
-        scores = ce.predict(pairs, show_progress_bar=False)
+        # batch_size=128 tuned for A100 40GB. Cross-encoder pair memory is well
+        # under 1 MB at 512 tokens, so 128 fits with room to spare. Default 32
+        # is conservative for 12 GB GPUs and bottlenecks the reranker stage.
+        scores = ce.predict(pairs, batch_size=128, show_progress_bar=False)
         scored = [(float(s), c) for s, c in zip(scores, candidates)]
         scored.sort(key=lambda x: x[0], reverse=True)
         out = []

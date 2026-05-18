@@ -25,9 +25,16 @@ from .common import embed_query, save_log, get_qdrant_client
 from .rerank import rerank as run_rerank
 
 
-def vector_search(query: str, top_k: int, verbose: bool = True) -> dict:
-    """Embed the query and return the top Qdrant matches."""
-    query_vec = embed_query(query)
+def vector_search(query: str, top_k: int, verbose: bool = True,
+                  query_vec: list[float] | None = None) -> dict:
+    """Embed the query and return the top Qdrant matches.
+
+    When `query_vec` is provided, skip embedding and reuse the pre-computed
+    vector. The eval worker uses this to batch-encode all queries for a combo
+    in one forward pass.
+    """
+    if query_vec is None:
+        query_vec = embed_query(query)
 
     qdrant = get_qdrant_client()
     response = qdrant.query_points(
@@ -59,8 +66,13 @@ def vector_search(query: str, top_k: int, verbose: bool = True) -> dict:
     return {"rankings": rankings}
 
 
-def retrieve(query: str, top_k: int = 10, verbose: bool = True) -> dict:
-    """Run dense retrieval with optional reranker. Returns retrieved chunks only."""
+def retrieve(query: str, top_k: int = 10, verbose: bool = True,
+             query_vec: list[float] | None = None) -> dict:
+    """Run dense retrieval with optional reranker. Returns retrieved chunks only.
+
+    `query_vec` lets callers feed a pre-computed embedding to skip the embed
+    stage. Used by the eval worker for batch-encoded queries.
+    """
     t_start = time.time()
     reranker = _common.RERANKER
     use_rerank = reranker != "none"
@@ -75,7 +87,7 @@ def retrieve(query: str, top_k: int = 10, verbose: bool = True) -> dict:
             print(f"First-stage top_n: {first_stage_n}")
         print(f"{'='*60}")
 
-    search_result = vector_search(query, first_stage_n, verbose)
+    search_result = vector_search(query, first_stage_n, verbose, query_vec=query_vec)
     rankings = search_result["rankings"]
 
     if not rankings:

@@ -122,6 +122,31 @@ def embed_query(query: str) -> list[float]:
     return [float(x) for x in vec]
 
 
+def embed_queries(queries: list[str], batch_size: int = 64) -> list[list[float]]:
+    """Embed multiple queries in one model forward-pass batch.
+
+    Used by the eval worker to amortize per-query GPU dispatch over all queries
+    in a combo. Single-query callers should keep using `embed_query`.
+    """
+    cfg = _EMBEDDING_MODEL_MAP.get(EMBEDDING_MODEL)
+    if not cfg:
+        raise ValueError(f"Unknown embedding model: {EMBEDDING_MODEL!r}")
+
+    st = _get_st_model(cfg["model_id"])
+    instruction = cfg.get("query_instruction")
+    texts = [
+        f"Instruct: {instruction}\nQuery: {q}" if instruction else q
+        for q in queries
+    ]
+    vecs = st.encode(
+        texts,
+        normalize_embeddings=True,
+        batch_size=batch_size,
+        show_progress_bar=False,
+    )
+    return [[float(x) for x in v] for v in vecs]
+
+
 def save_log(result: dict):
     """Persist a retrieval result under `data/retrieval_logs`."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)

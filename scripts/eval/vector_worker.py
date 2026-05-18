@@ -62,16 +62,17 @@ _RERANKER_CHOICES = ["none", "bge-reranker-v2-m3", "qwen3-reranker-0.6b"]
 _BATCH_END_SENTINEL = "--DONE--"
 
 
-def _run_retrieval(retrieve_fn, query: str, top_k: int) -> dict:
+def _run_retrieval(retrieve_fn, query: str, top_k: int,
+                   query_vec: list[float] | None = None) -> dict:
     """Call retrieve_vector.retrieve with verbose disabled, return raw result."""
-    return retrieve_fn(query, top_k=top_k, verbose=False)
+    return retrieve_fn(query, top_k=top_k, verbose=False, query_vec=query_vec)
 
 
 def _make_payload(args, llm_model, qid: str | None, top_k: int, query: str,
-                  retrieve_fn) -> dict:
+                  retrieve_fn, query_vec: list[float] | None = None) -> dict:
     """Run one retrieval and wrap the response in the standard payload shape."""
     try:
-        result = _run_retrieval(retrieve_fn, query, top_k)
+        result = _run_retrieval(retrieve_fn, query, top_k, query_vec=query_vec)
         payload = {
             "ok": True,
             "system": args.system,
@@ -129,10 +130,20 @@ def main() -> int:
     if args.qdrant_path:
         os.environ["QDRANT_PATH"] = args.qdrant_path
 
+    # Suppress library warnings before importing transformers / sentence-transformers.
+    # Orchestrator parses stdout line-by-line as JSON; a stray warning would corrupt
+    # the stream and fail the whole combo.
+    import warnings
+    import logging
+    warnings.filterwarnings("ignore")
+    logging.getLogger("transformers").setLevel(logging.ERROR)
+    logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+
     # Import once. First retrieve() call loads the embedding model and (optionally)
     # the reranker into GPU memory. Subsequent calls reuse the module-level caches
     # in vector/common.py and vector/rerank.py.
     from vector.retrieve_vector import retrieve
+    from vector.common import embed_queries
 
     try:
         from vectorless.llm import MODEL as _ans_model
@@ -149,7 +160,13 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=False))
         return 0
 
-    # Batch mode. One JSON object per line, "--DONE--" ends the stream.
+    # Batch mode. Collect all stdin lines first, batch-encode every query in one
+    # GPU forward pass, then loop per-query for the qdrant + rerank stages (qdrant
+    # API takes one vector at a time). Trade-off: stdout is no longer streamed
+    # line-by-line — orchestrator reads the whole stdout buffer after the process
+    # exits anyway, so latency-to-first-byte doesn't matter here.
+    pending: list[dict] = []
+    parse_errors: list[dict] = []
     for raw_line in sys.stdin:
         line = raw_line.strip()
         if not line:
@@ -159,30 +176,62 @@ def main() -> int:
         try:
             req = json.loads(line)
         except json.JSONDecodeError as exc:
-            err_payload = {
+            parse_errors.append({
                 "ok": False,
                 "error": f"Worker could not parse stdin line as JSON: {exc}",
                 "raw_line": line[:200],
-            }
-            print(json.dumps(err_payload, ensure_ascii=False))
-            sys.stdout.flush()
+            })
             continue
 
         qid = req.get("qid")
         query = req.get("query", "")
         top_k = int(req.get("top_k", args.top_k))
         if not query:
-            err_payload = {
+            parse_errors.append({
                 "ok": False,
                 "qid": qid,
                 "error": "Missing 'query' field in stdin payload",
+            })
+            continue
+        pending.append({"qid": qid, "query": query, "top_k": top_k})
+
+    # Emit parse errors first so the orchestrator still records them.
+    for err in parse_errors:
+        print(json.dumps(err, ensure_ascii=False))
+        sys.stdout.flush()
+
+    if not pending:
+        return 0
+
+    # One model forward pass for the entire combo. Loads the embedding model
+    # on first call (same module-level cache used by per-query path).
+    try:
+        query_vecs = embed_queries([p["query"] for p in pending])
+    except Exception as exc:
+        # Hard failure — emit one error per pending qid so the orchestrator
+        # marks them all rather than hanging on missing output.
+        for p in pending:
+            err_payload = {
+                "ok": False,
+                "qid": p["qid"],
+                "system": args.system,
+                "granularity": args.granularity,
+                "embedding_model": args.embedding_model,
+                "reranker": args.reranker,
+                "llm_model": llm_model,
+                "error": f"Batch embed failed: {exc}",
+                "traceback": traceback.format_exc(),
             }
             print(json.dumps(err_payload, ensure_ascii=False))
             sys.stdout.flush()
-            continue
+        return 1
 
-        payload = _make_payload(args, llm_model, qid=qid, top_k=top_k,
-                                query=query, retrieve_fn=retrieve)
+    for p, vec in zip(pending, query_vecs):
+        payload = _make_payload(
+            args, llm_model,
+            qid=p["qid"], top_k=p["top_k"], query=p["query"],
+            retrieve_fn=retrieve, query_vec=vec,
+        )
         print(json.dumps(payload, ensure_ascii=False))
         sys.stdout.flush()
 
