@@ -7,7 +7,7 @@ orchestrators can verify cache integrity.
 
 Usage.
     python scripts/eval/expand_queries.py --split dev
-    python scripts/eval/expand_queries.py --split val --force
+    python scripts/eval/expand_queries.py --split test --force
     python scripts/eval/expand_queries.py --split dev --model gemini-2.5-pro
 """
 
@@ -48,7 +48,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Pre-compute LLM-expanded queries for downstream eval runs."
     )
-    ap.add_argument("--split", required=True, choices=["dev", "val", "test"])
+    ap.add_argument("--split", required=True, choices=["dev", "test"])
     ap.add_argument("--testset", default="data/validated_testset.pkl")
     ap.add_argument(
         "--out",

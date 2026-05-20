@@ -21,7 +21,7 @@ cd "d:/Fasilkom UI/Kuliah/Semester 8/TA - Skripsi/02 Codebase/vectorless-and-vec
 7. REVIEW      log_review.py           author spot-check
 8. COLLECT     collect.py              merge accepted raw GT
 9. FINALIZE    finalize.py             build validated testset pickle
-10. SPLIT      split_dataset.py        write train/val/test qid splits
+10. SPLIT      split_dataset.py        write dev/test qid splits
 ```
 
 Steps 3 and 5 may be manual LLM calls or API calls. All other steps are local scripts.
@@ -46,7 +46,7 @@ All anchors must be leaf nodes in `data/index_rincian`.
 | `data/gt_audit/<doc_id>__<type>.json` | Author review decisions |
 | `data/ground_truth.json` | Merged accepted GT items |
 | `data/validated_testset.pkl` | Final evaluator input |
-| `data/splits/{train,val,test}_qids.json` | Split qid lists |
+| `data/splits/{dev,test}_qids.json` | Split qid lists |
 | `data/splits/split_manifest.json` | Split config, stats, and fingerprints |
 
 ## Select GT-Source Docs
@@ -248,14 +248,12 @@ python scripts/gt/split_dataset.py --verify
 Outputs:
 
 - `data/splits/dev_qids.json`
-- `data/splits/val_qids.json`
 - `data/splits/test_qids.json`
 - `data/splits/dev.jsonl`
-- `data/splits/val.jsonl`
 - `data/splits/test.jsonl`
 - `data/splits/split_manifest.json`
 
-The split is deterministic with seed `42` and stratifies by `(category, query_type)`.
+The split is 50/50 dev/test, deterministic with seed `42`, stratified by `(category, query_type)`.
 
 ## Batch Orchestrator
 
@@ -299,7 +297,7 @@ State names:
 | `log_review.py` | author review logger |
 | `collect.py` | merge accepted raw GT |
 | `finalize.py` | write `validated_testset.pkl` |
-| `split_dataset.py` | write train/val/test splits |
+| `split_dataset.py` | write dev/test splits |
 | `load_testset.py` | inspect final testset |
 | `run_allocation.py` | batch validation build/apply |
 | `build_catalog.py` | filter index catalogs to GT docs |

@@ -16,9 +16,15 @@ Roles.
   OCR_CLEAN_MODEL  Targeted OCR repair on leaf text.
   JUDGE_MODEL      Post-index quality verdict. Cross-family from parser.
   RETRIEVAL_MODEL  LLM nav and hybrid rerank at query time.
+
+RETRIEVAL_MODEL can be overridden via env var `RETRIEVAL_MODEL_OVERRIDE`
+for sensitivity testing without code change. Set before invoking eval to
+A/B different judge models on the same eval config.
 """
+
+import os
 
 SUMMARY_MODEL = "gemini-2.5-flash-lite"
 OCR_CLEAN_MODEL = "gemini-2.5-flash-lite"
 JUDGE_MODEL = "gemini-2.5-pro"
-RETRIEVAL_MODEL = "gemini-2.5-flash-lite"
+RETRIEVAL_MODEL = os.environ.get("RETRIEVAL_MODEL_OVERRIDE", "gemini-2.5-flash-lite")
