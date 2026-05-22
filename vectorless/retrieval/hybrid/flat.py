@@ -84,14 +84,19 @@ def llm_rerank(query: str, candidates: list[dict]) -> dict:
     navigation path, penjelasan) in a single prompt and produces a complete
     ordering. Candidates arrive in BM25 first-stage order and carry an
     explicit `bm25_rank` field so the model can use the first-stage signal
-    as a prior. The caller validates via `validate_llm_ranking` to drop
-    hallucinations and append missing IDs in BM25 order.
+    as a prior. The candidate key (the unique id the LLM ranks) is
+    `doc_id/node_id` so cross-doc nodes never collide. Pasal numbers reset
+    per document, so `node_id` alone is not unique across the corpus. The
+    caller validates via `validate_llm_ranking` to drop hallucinations and
+    append missing refs in BM25 order.
     """
     candidates_for_prompt = []
     for idx, c in enumerate(candidates):
+        ref = f"{c['doc_id']}/{c['node_id']}"
         entry = {
             "bm25_rank": idx + 1,
-            "node_id": c["node_id"],
+            "ref": ref,
+            "doc_id": c["doc_id"],
             "doc_title": c["doc_title"],
             "title": c["title"],
             "navigation_path": c["navigation_path"],
@@ -107,8 +112,9 @@ def llm_rerank(query: str, candidates: list[dict]) -> dict:
 
     prompt = f"""\
 Kamu diberi pertanyaan hukum dan {n_candidates} Pasal kandidat dari berbagai Undang-Undang.
-Setiap kandidat memiliki isi teks (text), penjelasan resmi (jika ada), dan `bm25_rank`
-(peringkat dari tahap pertama BM25, di mana rank 1 = paling cocok secara kata kunci).
+Setiap kandidat memiliki `ref` (format "doc_id/node_id" sebagai pengenal unik lintas UU),
+isi teks (text), penjelasan resmi (jika ada), dan `bm25_rank` (peringkat dari tahap pertama
+BM25, di mana rank 1 = paling cocok secara kata kunci).
 
 Kandidat sudah diurutkan menaik berdasarkan bm25_rank (rank 1 muncul pertama). Urutan
 ini adalah prior dari pencocokan term, bukan ground truth relevansi. Gunakan urutan ini
@@ -121,19 +127,19 @@ Kandidat Pasal:
 {candidates_text}
 
 Tugas: Urutkan SELURUH {n_candidates} kandidat dari paling relevan ke paling tidak relevan
-untuk menjawab pertanyaan. Output harus berisi SEMUA {n_candidates} node_ids dari input,
-tanpa duplikat dan tanpa node_id yang tidak ada di input.
+untuk menjawab pertanyaan. Output harus berisi SEMUA {n_candidates} ref dari input,
+tanpa duplikat dan tanpa ref yang tidak ada di input.
 
 Balas dalam format JSON:
 {{
   "thinking": "<penalaran singkat tentang kriteria ranking>",
-  "ranking": ["node_id_paling_relevan", "node_id_kedua", "...", "node_id_paling_tidak_relevan"]
+  "ranking": ["doc_id_1/node_id_1", "doc_id_2/node_id_2", "..."]
 }}
 
 Aturan:
-- "ranking" HARUS berisi tepat {n_candidates} node_ids
+- "ranking" HARUS berisi tepat {n_candidates} ref
 - "ranking" tidak boleh ada duplikat
-- Setiap node_id harus muncul di input (tidak boleh hallucinate)
+- Setiap ref harus muncul di input (tidak boleh hallucinate)
 - Urutan menentukan ranking (index 0 = paling relevan)
 - Pertimbangkan isi text, penjelasan, sumber UU (doc_title), navigation_path, dan bm25_rank sebagai prior
 - Kembalikan HANYA JSON
@@ -175,26 +181,30 @@ def retrieve(query: str, bm25_top_k: int = 20, verbose: bool = True) -> dict:
     # prior (exposed via the `bm25_rank` field in the prompt). See module docstring.
     rerank_result = llm_rerank(query, candidates)
 
-    # Track hallucinations before validation
+    # Track hallucinations before validation. Refs are doc_id/node_id so cross-doc
+    # collisions on bare node_id (Pasal numbers reset per doc) cannot mask candidates.
     raw_ranking = rerank_result.get("ranking", [])
-    valid_ids = {c["node_id"] for c in candidates}
-    n_hallucinated = sum(1 for nid in raw_ranking if nid not in valid_ids)
+    valid_refs = {f"{c['doc_id']}/{c['node_id']}" for c in candidates}
+    n_hallucinated = sum(1 for r in raw_ranking if r not in valid_refs)
 
-    ranked_ids = validate_llm_ranking(raw_ranking, candidates)
-    rerank_result["validated_ranking"] = ranked_ids
+    pseudo_candidates = [
+        {"node_id": f"{c['doc_id']}/{c['node_id']}"} for c in candidates
+    ]
+    ranked_refs = validate_llm_ranking(raw_ranking, pseudo_candidates)
+    rerank_result["validated_ranking"] = ranked_refs
     rerank_result["llm_ranking_length"] = len(raw_ranking)
-    rerank_result["validated_ranking_length"] = len(ranked_ids)
+    rerank_result["validated_ranking_length"] = len(ranked_refs)
     rerank_result["n_hallucinated"] = n_hallucinated
 
     steps["rerank"] = step_metrics(t_step, snap)
 
     if verbose:
-        print(f"\n[Hybrid-Flat LLM Rerank] Ranked {len(ranked_ids)} candidates")
+        print(f"\n[Hybrid-Flat LLM Rerank] Ranked {len(ranked_refs)} candidates")
         if rerank_result.get("thinking"):
             print(f"  Reasoning: {rerank_result['thinking'][:200]}")
 
-    candidate_map = {c["node_id"]: c for c in candidates}
-    ranked_results = [candidate_map[nid] for nid in ranked_ids if nid in candidate_map]
+    candidate_map = {f"{c['doc_id']}/{c['node_id']}": c for c in candidates}
+    ranked_results = [candidate_map[r] for r in ranked_refs if r in candidate_map]
 
     sources = []
     for pos, r in enumerate(ranked_results):
