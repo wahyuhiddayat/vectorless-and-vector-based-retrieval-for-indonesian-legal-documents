@@ -52,6 +52,15 @@ class ProgressLogger:
     def ok(self, text: str) -> None:
         self._emit(f"  + {text}")
 
+    def to_log(self, text: str) -> None:
+        """Append a line to progress.log only, never to stdout.
+
+        Used to mirror lines that a child process already printed live to
+        stdout, so the artifact log keeps the same content without
+        re-printing on the parent's terminal.
+        """
+        self._emit(text, to_stdout=False)
+
     def close(self) -> None:
         try:
             self._fh.close()
@@ -87,9 +96,15 @@ class ProgressLogger:
         self._emit("")
         self._emit(f"--- {title} {dashes} {now}")
         header = f"  {'qid':<8}  {'result':<6}  {'hit@1':>5}  {'hit@10':>6}  {'R@10':>5}  {'MRR':>5}  {'time':>6}  note"
-        self._emit(header)
+        self._emit(header, to_stdout=False)
 
     def query_line(self, record: dict, elapsed: float) -> None:
+        """Write one per-query diagnostic line to progress.log only.
+
+        Per-query lines are noisy on stdout (one per query, up to several
+        hundred per combo) so they live in the artifact log only. Live
+        runtime feedback on the terminal comes from `progress_tick` instead.
+        """
         qid = record.get("query_id", "?")
         hit1 = record.get("hit@1", 0.0)
         hit10 = record.get("hit@10", 0.0)
@@ -115,7 +130,8 @@ class ProgressLogger:
 
         self._emit(
             f"  {qid:<8}  {result_label:<6}  {hit1:>5.0f}  {hit10:>6.0f}  "
-            f"{r10:>5.2f}  {mrr:>5.2f}  {elapsed:>5.1f}s  {note}"
+            f"{r10:>5.2f}  {mrr:>5.2f}  {elapsed:>5.1f}s  {note}",
+            to_stdout=False,
         )
 
     def combo_summary(self, system: str, granularity: str, records: list[dict], elapsed_s: float) -> None:

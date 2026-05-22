@@ -23,7 +23,9 @@ from .aggregation import (
     compute_reference_mode_breakdown,
     compute_slice_summaries,
 )
-from .logger import ProgressLogger
+from .logger import ProgressLogger, _fmt_time
+
+PROGRESS_EVERY = 25  # emit a stdout tick every N queries inside a combo
 from .metrics import DEFAULT_CUTOFFS, sibling_failure_stats
 from .preflight import (
     check_corpus_consistency,
@@ -222,14 +224,24 @@ def _execute_one_combo(
     inter_query_delay_s: float,
     resume: bool,
     query_overrides: dict[str, str] | None = None,
+    progress_every: int = PROGRESS_EVERY,
+    verbose_prefix: bool = False,
 ) -> dict:
     """Execute one (system, granularity) combo as a standalone unit.
 
-    Returns a dict with `records`, `elapsed_s`, `error_categories`, and
-    accumulated `log_lines`. Designed to be picklable for parallel
-    submission via ProcessPoolExecutor. Per-combo JSONL writes happen
-    inside this function; no cross-combo file contention because each
-    combo owns one JSONL filename.
+    Returns a dict with `records`, `elapsed_s`, `error_categories`,
+    accumulated `log_lines`, and `tick_lines`. Designed to be picklable
+    for parallel submission via ProcessPoolExecutor. Per-combo JSONL
+    writes happen inside this function, no cross-combo file contention
+    because each combo owns one JSONL filename.
+
+    Live stdout progress is emitted directly from here every
+    `progress_every` queries via `print(..., flush=True)`. When running
+    in parallel mode (`verbose_prefix=True`) each tick is prefixed with
+    `system x granularity` so interleaved output from multiple workers
+    stays identifiable. Each tick is also collected into `tick_lines`
+    so the parent can mirror it into progress.log without re-printing
+    to stdout.
     """
     combo_path = records_dir / eval_io.combo_filename(system, granularity)
     completed = (
@@ -239,6 +251,7 @@ def _execute_one_combo(
     invalid = getattr(eval_io.read_records_file, "last_invalid_count", 0)
 
     log_lines: list[str] = []
+    tick_lines: list[str] = []
     if invalid:
         log_lines.append(
             f"  resume: skipped {invalid} truncated/invalid record(s) in "
@@ -254,6 +267,11 @@ def _execute_one_combo(
     combo_records: list[dict] = []
     error_categories: dict[str, int] = {}
     query_lines: list[tuple[dict, float]] = []
+    new_records: list[dict] = []
+
+    total_to_execute = sum(1 for qid, _ in selected_queries if qid not in completed)
+    executed = 0
+    prefix = f"{system} x {granularity:<8}  " if verbose_prefix else ""
 
     combo_t0 = time.time()
     combo_fh = combo_path.open(mode, encoding="utf-8")
@@ -275,10 +293,27 @@ def _execute_one_combo(
             combo_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             combo_fh.flush()
             combo_records.append(record)
+            new_records.append(record)
             query_lines.append((record, elapsed))
+            executed += 1
             if record.get("error"):
                 cat = record.get("error_category", "other") or "other"
                 error_categories[cat] = error_categories.get(cat, 0) + 1
+            if (executed % progress_every == 0) or (executed == total_to_execute):
+                n = len(new_records)
+                running_hit1 = sum(r.get("hit@1", 0.0) for r in new_records) / n
+                running_r10 = sum(r.get("recall@10", 0.0) for r in new_records) / n
+                running_mrr = sum(r.get("mrr@10", 0.0) for r in new_records) / n
+                total_errors = sum(error_categories.values())
+                wall_now = time.time() - combo_t0
+                tick = (
+                    f"  {prefix}[{executed:>4}/{total_to_execute:>4}]  "
+                    f"Hit@1={running_hit1:.3f}  R@10={running_r10:.3f}  "
+                    f"MRR={running_mrr:.3f}  errors={total_errors}  "
+                    f"wall={_fmt_time(wall_now)}"
+                )
+                print(tick, flush=True)
+                tick_lines.append(tick)
             if system in llm_systems and inter_query_delay_s > 0:
                 time.sleep(inter_query_delay_s)
     finally:
@@ -293,6 +328,7 @@ def _execute_one_combo(
         "error_categories": error_categories,
         "log_lines": log_lines,
         "query_lines": query_lines,
+        "tick_lines": tick_lines,
     }
 
 
@@ -558,12 +594,22 @@ class EvalRunner:
             inter_query_delay_s=self.inter_query_delay_s,
             resume=self.resume,
             query_overrides=self.query_overrides,
+            progress_every=PROGRESS_EVERY,
+            verbose_prefix=self.parallel_combos > 1,
         )
 
     def _absorb_combo_result(self, result: dict) -> None:
-        """Merge one finished combo's result into runner state and emit logs."""
+        """Merge one finished combo's result into runner state and emit logs.
+
+        Tick lines were already printed live to stdout by the executing
+        combo, so mirror them into progress.log only (via `to_log`) and
+        skip re-printing to stdout. Per-query lines are log-file-only by
+        design (see `ProgressLogger.query_line`).
+        """
         for line in result.get("log_lines", []) or []:
             self.logger.info(line)
+        for tick in result.get("tick_lines", []) or []:
+            self.logger.to_log(tick)
         for record, elapsed in result.get("query_lines", []) or []:
             self.logger.query_line(record, elapsed)
         for cat, n in (result.get("error_categories") or {}).items():

@@ -32,6 +32,14 @@ def tokenize(text: str) -> list[str]:
     No stopword removal, no stemming. Aligns with Faisal et al. (2024)
     Table 5: both preprocessing techniques decrease BM25 EM on Indonesian
     legal QA. BM25 IDF naturally downweights common terms.
+
+    Single letters (huruf list markers a/b/c) are dropped, single digits
+    are kept to preserve legal citations (Pasal 3, ayat 1). The 2026-05-20
+    ablation (run25 vs run23) confirmed the filter is neutral on retrieval
+    quality (max delta +0.006 H@1 at ayat, others within noise), since
+    BM25 IDF independently downweights high-DF letters. The filter is
+    retained for alignment with Faisal et al. (2024) preprocessing
+    methodology, not for a measurable retrieval lift.
     """
     return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > 1 or t.isdigit()]
 

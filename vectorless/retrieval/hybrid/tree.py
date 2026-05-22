@@ -19,7 +19,6 @@ Usage:
 
 import argparse
 import json
-import random
 import time
 
 from rank_bm25 import BM25Okapi
@@ -206,21 +205,23 @@ def _bm25_node_candidates(query: str, doc: dict, top_k: int = 20) -> list[dict]:
 def _llm_rerank_multidoc(query: str, candidates: list[dict]) -> dict:
     """Ask the LLM to rank candidates from multiple docs in a single call.
 
-    Listwise reranking across docs: each candidate carries its `doc_id` and
+    Listwise reranking across docs. Each candidate carries its `doc_id` and
     `doc_title` so the reranker can disambiguate when nodes share titles or
-    navigation paths across documents. Candidates are shuffled before this
-    call to mitigate anchor bias from the BM25 ordering, and the caller
-    validates via `validate_llm_ranking` to drop hallucinations and append
-    missing ids.
+    navigation paths across documents. Candidates arrive in BM25 first-stage
+    order (globally sorted by `bm25_score` across all picked docs) and carry
+    an explicit `bm25_rank` field so the model can use the first-stage signal
+    as a prior. The caller validates via `validate_llm_ranking` to drop
+    hallucinations and append missing ids in the same BM25 order.
 
     The candidate key (the unique id the LLM ranks) is `doc_id/node_id` so
     cross-doc nodes never collide. `validate_llm_ranking` operates on this
-    string id; the caller resolves back to (doc_id, node_id) tuples.
+    string id, the caller resolves back to (doc_id, node_id) tuples.
     """
     candidates_for_prompt = []
-    for c in candidates:
+    for idx, c in enumerate(candidates):
         key = f"{c['doc_id']}/{c['node_id']}"
         entry = {
+            "bm25_rank": idx + 1,
             "ref": key,
             "doc_id": c["doc_id"],
             "doc_title": c.get("doc_title", ""),
@@ -238,7 +239,14 @@ def _llm_rerank_multidoc(query: str, candidates: list[dict]) -> dict:
 
     prompt = f"""\
 Kamu diberi pertanyaan hukum dan {n_candidates} Pasal kandidat dari beberapa UU dalam katalog.
-Setiap kandidat punya `ref` (format "doc_id/node_id"), doc_id, doc_title, navigation_path, text, dan penjelasan resmi (jika ada).
+Setiap kandidat punya `ref` (format "doc_id/node_id"), doc_id, doc_title, navigation_path,
+text, penjelasan resmi (jika ada), dan `bm25_rank` (peringkat dari tahap pertama BM25 lintas
+UU, di mana rank 1 = paling cocok secara kata kunci).
+
+Kandidat sudah diurutkan menaik berdasarkan bm25_rank (rank 1 muncul pertama). Urutan ini
+adalah prior dari pencocokan term lintas UU, bukan ground truth relevansi. Gunakan urutan
+ini sebagai sinyal awal, lalu pertimbangkan isi text dan penjelasan untuk menentukan
+ranking akhir yang benar.
 
 Pertanyaan: {query}
 
@@ -260,7 +268,7 @@ Aturan:
 - "ranking" tidak boleh ada duplikat
 - Setiap ref harus muncul di input (tidak boleh hallucinate)
 - Urutan menentukan ranking (index 0 = paling relevan)
-- Pertimbangkan isi text, penjelasan, navigation_path, dan doc_title untuk konteks lintas UU
+- Pertimbangkan isi text, penjelasan, navigation_path, doc_title, dan bm25_rank sebagai prior
 - Kembalikan HANYA JSON
 """
 
@@ -327,11 +335,12 @@ def retrieve(query: str, bm25_top_k: int = 20, top_k: int = 10,
         return {"query": query, "strategy": "hybrid", "picked_doc_ids": doc_ids,
                 "error": "No relevant nodes found"}
 
-    # Shuffle to mitigate anchor bias from BM25 order before LLM rerank.
-    shuffled = list(all_candidates)
-    random.shuffle(shuffled)
+    # Sort globally by BM25 score so the LLM sees one coherent first-stage rank
+    # across all picked docs. The `bm25_rank` field in the prompt exposes this
+    # prior explicitly. See _llm_rerank_multidoc docstring for the rationale.
+    all_candidates.sort(key=lambda c: -c["bm25_score"])
 
-    rerank_result = _llm_rerank_multidoc(query, shuffled)
+    rerank_result = _llm_rerank_multidoc(query, all_candidates)
     raw_ranking = rerank_result.get("ranking", [])
     valid_refs = {f"{c['doc_id']}/{c['node_id']}" for c in all_candidates}
     n_hallucinated = sum(1 for r in raw_ranking if r not in valid_refs)

@@ -4,9 +4,13 @@ BM25 global search across all leaf nodes, followed by LLM listwise reranking.
 No tree structure is used. This is the flat variant of hybrid retrieval.
 
 Stage 1: BM25 search across ALL leaf nodes (same corpus as bm25-flat).
-Stage 2: LLM ranks all BM25 candidates from most to least relevant.
-         Candidates are shuffled before prompting to avoid anchor bias
-         (LLM receiving candidates in BM25 order tends to preserve that order).
+Stage 2: LLM ranks all BM25 candidates from most to least relevant. Candidates
+         are passed in BM25 order and carry a `bm25_rank` field, so the model
+         can use the first-stage ranking as an explicit prior rather than a
+         hidden positional signal. Aligned with mainstream hybrid-rerank
+         practice (Cohere Rerank, Voyage Rerank, RankGPT sliding window,
+         LegalBench-RAG baselines), and avoids the non-determinism of an
+         unseeded pre-rerank shuffle.
 
 Unlike the tree-based hybrid strategy that navigates within a selected doc,
 this variant searches the full leaf node corpus directly, eliminating the
@@ -19,7 +23,6 @@ Usage:
 
 import argparse
 import json
-import random
 import time
 
 from rank_bm25 import BM25Okapi
@@ -77,15 +80,17 @@ def flat_bm25_candidates(query: str, leaves: list[dict], top_k: int = 20,
 def llm_rerank(query: str, candidates: list[dict]) -> dict:
     """Ask the LLM to rank all candidates from most to least relevant.
 
-    Listwise reranking: the LLM sees all candidates (full text, title,
+    Listwise reranking. The LLM sees all candidates (full text, title,
     navigation path, penjelasan) in a single prompt and produces a complete
-    ordering. Candidates are shuffled before this call to mitigate anchor
-    bias from the BM25 ordering. The caller validates via
-    `validate_llm_ranking` to drop hallucinations and append missing IDs.
+    ordering. Candidates arrive in BM25 first-stage order and carry an
+    explicit `bm25_rank` field so the model can use the first-stage signal
+    as a prior. The caller validates via `validate_llm_ranking` to drop
+    hallucinations and append missing IDs in BM25 order.
     """
     candidates_for_prompt = []
-    for c in candidates:
+    for idx, c in enumerate(candidates):
         entry = {
+            "bm25_rank": idx + 1,
             "node_id": c["node_id"],
             "doc_title": c["doc_title"],
             "title": c["title"],
@@ -102,7 +107,13 @@ def llm_rerank(query: str, candidates: list[dict]) -> dict:
 
     prompt = f"""\
 Kamu diberi pertanyaan hukum dan {n_candidates} Pasal kandidat dari berbagai Undang-Undang.
-Setiap kandidat memiliki isi teks (text), dan penjelasan resmi (jika ada).
+Setiap kandidat memiliki isi teks (text), penjelasan resmi (jika ada), dan `bm25_rank`
+(peringkat dari tahap pertama BM25, di mana rank 1 = paling cocok secara kata kunci).
+
+Kandidat sudah diurutkan menaik berdasarkan bm25_rank (rank 1 muncul pertama). Urutan
+ini adalah prior dari pencocokan term, bukan ground truth relevansi. Gunakan urutan ini
+sebagai sinyal awal, lalu pertimbangkan isi text dan penjelasan untuk menentukan ranking
+akhir yang benar.
 
 Pertanyaan: {query}
 
@@ -124,7 +135,7 @@ Aturan:
 - "ranking" tidak boleh ada duplikat
 - Setiap node_id harus muncul di input (tidak boleh hallucinate)
 - Urutan menentukan ranking (index 0 = paling relevan)
-- Pertimbangkan isi text, penjelasan, sumber UU (doc_title), dan navigation_path
+- Pertimbangkan isi text, penjelasan, sumber UU (doc_title), navigation_path, dan bm25_rank sebagai prior
 - Kembalikan HANYA JSON
 """
 
@@ -160,12 +171,9 @@ def retrieve(query: str, bm25_top_k: int = 20, verbose: bool = True) -> dict:
     snap = snapshot_counters()
     t_step = time.time()
 
-    # Shuffle to mitigate anchor bias: LLM receives BM25 order by default
-    # and tends to preserve it (see listwise reranking literature).
-    shuffled = list(candidates)
-    random.shuffle(shuffled)
-
-    rerank_result = llm_rerank(query, shuffled)
+    # Pass candidates in BM25 order so the LLM sees the first-stage rank as a
+    # prior (exposed via the `bm25_rank` field in the prompt). See module docstring.
+    rerank_result = llm_rerank(query, candidates)
 
     # Track hallucinations before validation
     raw_ranking = rerank_result.get("ranking", [])
