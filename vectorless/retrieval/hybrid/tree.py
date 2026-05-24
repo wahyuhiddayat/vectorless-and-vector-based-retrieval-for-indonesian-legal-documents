@@ -1,16 +1,9 @@
-"""Hybrid tree-based retrieval for Indonesian legal QA.
+"""Hybrid tree retrieval for Indonesian legal QA.
 
-Combines keyword matching (BM25) with LLM semantic understanding using the
-document tree structure. This is the tree variant of hybrid retrieval.
-
-Pipeline:
-  1. Doc search  - union of BM25 metadata match + LLM semantic selection
-  2. Node search - BM25 retrieves candidate Pasal within selected doc, LLM reranks
-
-This addresses weaknesses of both pure approaches:
-  - Pure BM25 fails on vocabulary mismatch (query term not in metadata)
-  - Pure LLM fails on blind navigation (generic titles like "Pasal 3")
-  - Hybrid: BM25 finds keyword-relevant content, LLM adds semantic understanding
+Combines BM25 keyword matching with LLM semantic understanding.
+Documents are selected by merging BM25 and LLM picks, then leaf
+candidates within each document are scored by BM25 and reranked
+by the LLM in a single listwise call.
 
 Usage:
     python -m vectorless.retrieval.hybrid.tree "Apa syarat penyadapan?"
@@ -35,10 +28,16 @@ from ..common import (
 def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K) -> list[dict]:
     """Rank catalog entries with BM25 over the doc corpus string.
 
-    Corpus per doc comes from `doc_corpus_string` (metadata + the aggregated
-    `doc_summary_text` from indexing.build) so doc-level signal is rich
-    enough to actually rank docs by topical match instead of the 15-20
-    token metadata baseline. Returns up to `top_k` docs above zero score.
+    Each document is represented by its metadata and aggregated summary
+    text from doc_corpus_string.
+
+    Args:
+        query: Legal question in Indonesian.
+        catalog: List of document metadata dicts.
+        top_k: Number of top documents to return.
+
+    Returns:
+        List of dicts with doc_id, judul, and bm25_score.
     """
     corpus = [tokenize(doc_corpus_string(doc)) for doc in catalog]
 
@@ -60,10 +59,15 @@ def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_
 def _llm_doc_search(query: str, catalog: list[dict]) -> list[dict]:
     """Ask the LLM to pick relevant documents from the catalog.
 
-    The catalog is projected through `catalog_for_llm_prompt` to truncate
-    each doc's aggregated summary to a manageable per-doc budget. Full
-    summaries would inflate the prompt past a comfortable budget at 308
-    docs in scope.
+    The catalog is projected through catalog_for_llm_prompt to keep the
+    prompt within a manageable token budget.
+
+    Args:
+        query: Legal question in Indonesian.
+        catalog: List of document metadata dicts.
+
+    Returns:
+        LLM response dict with thinking and doc_ids fields.
     """
     slim_catalog = catalog_for_llm_prompt(catalog)
     docs_text = json.dumps(slim_catalog, ensure_ascii=False, indent=2)
@@ -95,12 +99,19 @@ Aturan:
 
 def doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K,
                verbose: bool = True) -> dict:
-    """Merge BM25 catalog hits with the LLM's document picks, cap at top_k.
+    """Select documents by merging BM25 and LLM picks, capped at top_k.
 
-    LLM picks take precedence; BM25 picks fill remaining slots up to
-    `top_k`. Both stages are recall-oriented (1-3 docs each), so the merge
-    rarely produces fewer than `top_k` docs unless the catalog is genuinely
-    empty of topical overlap.
+    LLM and BM25 picks are interleaved with LLM taking priority at
+    each position.
+
+    Args:
+        query: Legal question in Indonesian.
+        catalog: List of document metadata dicts.
+        top_k: Maximum number of documents to return.
+        verbose: Print selected documents to stdout.
+
+    Returns:
+        Dict with merged doc_ids, bm25_results, and llm_result.
     """
     bm25_results = _bm25_doc_search(query, catalog, top_k=top_k)
     llm_result = _llm_doc_search(query, catalog)
@@ -111,11 +122,6 @@ def doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K,
     valid_ids = {d["doc_id"] for d in catalog}
     llm_ids = [doc_id for doc_id in llm_ids if doc_id in valid_ids]
 
-    # Interleave LLM and BM25 picks so neither signal dominates. LLM gets
-    # priority at each position (semantic precedence), but BM25 always has
-    # a slot if both lists have entries at that rank. This matters when
-    # LLM picks semantically-related-but-keyword-mismatched docs while BM25
-    # picks the lexically-matching doc that actually contains the answer.
     seen: set[str] = set()
     merged_ids: list[str] = []
     for i in range(max(len(llm_ids), len(bm25_ids))):
@@ -164,11 +170,18 @@ def _collect_leaf_nodes(nodes: list[dict]) -> list[dict]:
 
 
 def _bm25_node_candidates(query: str, doc: dict, top_k: int = 20) -> list[dict]:
-    """Return the top leaf candidates scored by BM25.
+    """Score leaf nodes in one document with BM25 and return top candidates.
 
-    Corpus enrichment mirrors `vectorless/retrieval/bm25/flat.py`
-    (doc_title + navigation_path + text + penjelasan) so within-doc BM25
-    ranking is comparable across flat and hybrid-tree variants.
+    Uses the same enrichment fields as bm25-flat for consistency
+    (doc_title + navigation_path + text + penjelasan).
+
+    Args:
+        query: Legal question in Indonesian.
+        doc: Loaded document dict with structure field.
+        top_k: Maximum number of candidates to return.
+
+    Returns:
+        List of candidate dicts sorted by BM25 score descending.
     """
     leaves = _collect_leaf_nodes(doc["structure"])
     if not leaves:
@@ -203,19 +216,19 @@ def _bm25_node_candidates(query: str, doc: dict, top_k: int = 20) -> list[dict]:
 
 
 def _llm_rerank_multidoc(query: str, candidates: list[dict]) -> dict:
-    """Ask the LLM to rank candidates from multiple docs in a single call.
+    """Ask the LLM to rank cross-document candidates in a single call.
 
-    Listwise reranking across docs. Each candidate carries its `doc_id` and
-    `doc_title` so the reranker can disambiguate when nodes share titles or
-    navigation paths across documents. Candidates arrive in BM25 first-stage
-    order (globally sorted by `bm25_score` across all picked docs) and carry
-    an explicit `bm25_rank` field so the model can use the first-stage signal
-    as a prior. The caller validates via `validate_llm_ranking` to drop
-    hallucinations and append missing ids in the same BM25 order.
+    Each candidate is identified by a compound ref (doc_id/node_id).
+    The LLM receives all candidates with full text and produces a
+    complete ordering.
 
-    The candidate key (the unique id the LLM ranks) is `doc_id/node_id` so
-    cross-doc nodes never collide. `validate_llm_ranking` operates on this
-    string id, the caller resolves back to (doc_id, node_id) tuples.
+    Args:
+        query: Legal question in Indonesian.
+        candidates: Candidate dicts from multiple documents, each with
+            doc_id, doc_title, node_id, text, and bm25_score.
+
+    Returns:
+        LLM response dict with thinking and ranking fields.
     """
     candidates_for_prompt = []
     for idx, c in enumerate(candidates):
@@ -277,15 +290,22 @@ Aturan:
 
 def retrieve(query: str, bm25_top_k: int = 20, top_k: int = 10,
              top_k_docs: int = DOC_PICK_TOP_K, verbose: bool = True) -> dict:
-    """Run the multi-doc hybrid retrieval pipeline for one query.
+    """Run the full hybrid tree retrieval pipeline across multiple documents.
 
-    Stage 1: BM25 + LLM merge doc-pick (top-K=3).
-    Stage 2: BM25 leaf candidates per picked doc, concatenated.
-    Stage 3: single LLM listwise rerank across all cross-doc candidates.
+    Selects documents via BM25 + LLM merge, collects BM25 leaf candidates
+    from each picked document, and reranks all candidates with a single
+    LLM listwise call. Two LLM calls per query total.
 
-    LLM call count: 2 (doc-pick + cross-doc rerank), independent of K. The
-    rerank prompt grows linearly with K but fits comfortably in Gemini's
-    1M context at K=3 (about 30K tokens of candidate text).
+    Args:
+        query: Legal question in Indonesian.
+        bm25_top_k: Number of BM25 candidates per document.
+        top_k: Final number of results to return.
+        top_k_docs: Number of documents selected at stage 1.
+        verbose: Print progress to stdout.
+
+    Returns:
+        Dict with query, strategy, doc search, rerank result, sources,
+        and metrics.
     """
     reset_counters()
     t_start = time.time()
@@ -335,9 +355,6 @@ def retrieve(query: str, bm25_top_k: int = 20, top_k: int = 10,
         return {"query": query, "strategy": "hybrid", "picked_doc_ids": doc_ids,
                 "error": "No relevant nodes found"}
 
-    # Sort globally by BM25 score so the LLM sees one coherent first-stage rank
-    # across all picked docs. The `bm25_rank` field in the prompt exposes this
-    # prior explicitly. See _llm_rerank_multidoc docstring for the rationale.
     all_candidates.sort(key=lambda c: -c["bm25_score"])
 
     rerank_result = _llm_rerank_multidoc(query, all_candidates)
@@ -406,7 +423,8 @@ def retrieve(query: str, bm25_top_k: int = 20, top_k: int = 10,
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Hybrid BM25+LLM retrieval for Indonesian legal QA")
+    """CLI entry point for hybrid tree retrieval."""
+    ap = argparse.ArgumentParser(description="Hybrid tree retrieval (BM25 + LLM) for Indonesian legal QA")
     ap.add_argument("query", help="Legal question in Indonesian")
     ap.add_argument("--bm25_top_k", type=int, default=20,
                     help="Max BM25 candidates per doc for LLM reranking (default: 20)")

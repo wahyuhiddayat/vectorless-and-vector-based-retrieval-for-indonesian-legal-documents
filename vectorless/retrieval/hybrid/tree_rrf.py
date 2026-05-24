@@ -1,18 +1,9 @@
-"""Hybrid tree-based retrieval with RRF fusion at the cross-doc rerank stage.
+"""Hybrid tree retrieval with RRF fusion at the cross-doc rerank stage.
 
-Stage 1: doc-pick (LLM + BM25 merge, identical to hybrid-tree).
-Stage 2: per-doc BM25 candidates concatenated cross-doc (identical to hybrid-tree).
-Stage 3: BM25 cross-doc ranking by raw bm25_score AND LLM listwise rerank,
-         fused via Reciprocal Rank Fusion (Cormack et al. 2009) instead of
-         taking the LLM ordering as final.
-
-Difference vs `hybrid-tree`:
-  - hybrid-tree:     LLM rerank ordering = final
-  - hybrid-tree-rrf: RRF(BM25 cross-doc rank, LLM rerank rank) = final
-
-This is the tree analogue of `hybrid-flat-rrf`. Tests whether the
-cascade-vs-fusion tradeoff observed at flat granularity (R@10 slight
-gain, H@1 substantial drop) replicates in the tree paradigm.
+Same document selection and candidate collection as hybrid-tree, but
+the final ranking fuses BM25 cross-doc scores and LLM rerank scores
+via Reciprocal Rank Fusion (Cormack et al. 2009) instead of taking
+the LLM ordering as final.
 
 Usage:
     python -m vectorless.retrieval.hybrid.tree_rrf "Apa syarat penyadapan?"
@@ -35,15 +26,24 @@ from .flat_rrf import rrf_fuse
 def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
              top_k: int = 10, top_k_docs: int = DOC_PICK_TOP_K,
              verbose: bool = True) -> dict:
-    """Run hybrid-tree-rrf pipeline. Stage 1 and Stage 2 identical to hybrid-tree.
+    """Run the full hybrid tree RRF retrieval pipeline.
 
-    Stage 3 fuses two ranked lists via RRF instead of letting LLM cascade win:
-      - bm25_ranking: cross-doc candidates sorted by raw per-doc bm25_score
-      - llm_ranking: LLM listwise output over shuffled candidates
-      - fused = rrf_fuse(bm25_ranking, llm_ranking, k_rrf=60)
+    Uses the same document selection and BM25 candidate collection as
+    hybrid-tree. The BM25 cross-doc ranking and the LLM listwise
+    reranking are fused with RRF to produce the final ordering.
+    Two LLM calls per query total.
 
-    LLM call count: 2 per query (doc-pick + cross-doc rerank), identical
-    to hybrid-tree.
+    Args:
+        query: Legal question in Indonesian.
+        bm25_top_k: Number of BM25 candidates per document.
+        k_rrf: RRF dampening constant.
+        top_k: Number of final results to return.
+        top_k_docs: Number of documents selected at stage 1.
+        verbose: Print progress to stdout.
+
+    Returns:
+        Dict with query, strategy, doc search, rerank and RRF results,
+        sources, and metrics.
     """
     reset_counters()
     t_start = time.time()
@@ -92,10 +92,6 @@ def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
         return {"query": query, "strategy": "hybrid-tree-rrf",
                 "picked_doc_ids": doc_ids, "error": "No relevant nodes found"}
 
-    # Stage 3a: BM25 cross-doc ranking by raw per-doc bm25_score. Per-doc
-    # scores are comparable cross-doc because tokenization, query terms,
-    # and enrichment fields (doc_title + nav_path + text + penjelasan) are
-    # uniform across docs.
     bm25_sorted = sorted(
         all_candidates,
         key=lambda c: c.get("bm25_score", 0.0),
@@ -103,7 +99,7 @@ def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
     )
     bm25_ranking_refs = [f"{c['doc_id']}/{c['node_id']}" for c in bm25_sorted]
 
-    # Stage 3b: LLM listwise rerank, identical pattern to hybrid-tree.
+    # Shuffle to avoid positional bias in the LLM rerank
     shuffled = list(all_candidates)
     random.shuffle(shuffled)
     rerank_result = _llm_rerank_multidoc(query, shuffled)
@@ -126,7 +122,6 @@ def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
         if rerank_result.get("thinking"):
             print(f"  Reasoning: {rerank_result['thinking'][:200]}")
 
-    # Stage 3c: RRF fusion of BM25 cross-doc and LLM rerank rankings.
     fused_refs, rrf_scores = rrf_fuse(
         bm25_ranking_refs, llm_ranking_refs, k_rrf=k_rrf, top_k=top_k,
     )

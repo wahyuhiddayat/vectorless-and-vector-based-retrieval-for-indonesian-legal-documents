@@ -1,17 +1,8 @@
 """Hybrid flat retrieval with RRF fusion of BM25 and LLM rankings.
 
-Stage 1: BM25 global search across all leaf nodes (top-N candidates).
-Stage 2: LLM listwise reranks the same N candidates.
-Stage 3: Reciprocal Rank Fusion (Cormack et al. 2009) of BM25 rank
-         and LLM rank. Final order = sorted by RRF score.
-
-Difference vs `hybrid-flat`:
-  - hybrid-flat: LLM rerank consumes BM25 ranking (LLM ordering = final)
-  - hybrid-flat-rrf: BM25 ranking AND LLM ranking are independent signals,
-                    fused via score sum 1/(k+rank_bm25) + 1/(k+rank_llm)
-
-This variant represents the classic academic IR hybrid paradigm
-(score fusion) versus the modern production RAG cascade rerank paradigm.
+BM25 and LLM each produce an independent ranking over the same
+candidate set. The two rankings are fused via Reciprocal Rank Fusion
+(Cormack et al. 2009) to produce the final ordering.
 
 Usage:
     python -m vectorless.retrieval.hybrid.flat_rrf "Apa syarat penyadapan?"
@@ -29,22 +20,20 @@ from .flat import flat_bm25_candidates, llm_rerank
 
 def rrf_fuse(rankings_a: list[str], rankings_b: list[str],
              k_rrf: int = 60, top_k: int = 10) -> tuple[list[str], dict[str, float]]:
-    """Reciprocal Rank Fusion of two ranked id lists.
+    """Fuse two ranked id lists using Reciprocal Rank Fusion.
 
-    Each id receives score 1/(k_rrf + rank) from each ranking it appears in.
-    Items present in only one ranking still receive that ranking's contribution.
-    Ties are broken by appearance order in `rankings_a` so the output is
-    deterministic.
+    Each id receives score 1/(k_rrf + rank) from each ranking it appears
+    in. Items in only one ranking receive that ranking's contribution.
+    Ties are broken by appearance order in rankings_a.
 
     Args:
-        rankings_a: first ranked id list, rank 1 = best.
-        rankings_b: second ranked id list, rank 1 = best.
-        k_rrf: RRF dampening constant. 60 is the original Cormack et al. value
-            and is the de-facto standard in IR.
-        top_k: final cut.
+        rankings_a: First ranked id list, rank 1 is best.
+        rankings_b: Second ranked id list, rank 1 is best.
+        k_rrf: RRF dampening constant (default 60, Cormack et al. 2009).
+        top_k: Number of fused results to return.
 
     Returns:
-        (fused_top_k_ids, score_map). score_map covers every id in either input.
+        Tuple of (fused top-k ids, full score map).
     """
     scores: dict[str, float] = {}
     for rank, nid in enumerate(rankings_a, start=1):
@@ -61,7 +50,22 @@ def rrf_fuse(rankings_a: list[str], rankings_b: list[str],
 
 def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
              top_k: int = 10, verbose: bool = True) -> dict:
-    """Run the BM25 + LLM rerank + RRF fusion pipeline for one query."""
+    """Run the full hybrid flat RRF retrieval pipeline.
+
+    BM25 scores all leaf nodes, the LLM reranks shuffled candidates
+    independently, and the two rankings are fused with RRF.
+
+    Args:
+        query: Legal question in Indonesian.
+        bm25_top_k: Number of BM25 candidates for reranking.
+        k_rrf: RRF dampening constant.
+        top_k: Number of final results to return.
+        verbose: Print progress to stdout.
+
+    Returns:
+        Dict with query, strategy, candidates, rerank and RRF results,
+        sources, and metrics.
+    """
     reset_counters()
     t_start = time.time()
     steps: dict = {}
@@ -87,37 +91,27 @@ def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
         return {"query": query, "strategy": "hybrid-flat-rrf",
                 "error": "No BM25 candidates found"}
 
-    # Compound ref "doc_id/node_id" is the unique key. Plain node_id is NOT
-    # unique across docs at pasal granularity (e.g. many docs have pasal_1),
-    # so RRF over plain node_id would conflate distinct items and sum scores.
     def _ref(c: dict) -> str:
+        """Build a compound ref that is unique across documents."""
         return f"{c['doc_id']}/{c['node_id']}"
 
-    # BM25 ranking preserved from BM25 score order (already sorted descending).
     bm25_ranking_refs = [_ref(c) for c in candidates]
 
     snap = snapshot_counters()
     t_step = time.time()
 
-    # Shuffle before LLM to mitigate BM25-order anchor bias on the LLM rerank.
+    # Shuffle to avoid positional bias in the LLM rerank
     shuffled = list(candidates)
     random.shuffle(shuffled)
 
     rerank_result = llm_rerank(query, shuffled)
 
     raw_ranking = rerank_result.get("ranking", [])
-    # LLM returns node_ids. Map back to refs via shuffle order; ambiguous
-    # node_ids (duplicate across docs in the chunk) resolve to the candidate
-    # they appeared in within the prompt order. validate_llm_ranking dedupes
-    # at node_id level which is acceptable here because the LLM only saw one
-    # text per node_id occurrence and its semantic intent is the chosen ref.
     valid_ids = {c["node_id"] for c in candidates}
     n_hallucinated = sum(1 for nid in raw_ranking if nid not in valid_ids)
     llm_node_ranking = validate_llm_ranking(raw_ranking, candidates)
 
-    # Resolve LLM node-id ranking to refs by walking candidates in prompt order.
-    # If a node_id maps to multiple refs (cross-doc duplicate), pick the first
-    # unvisited ref. This is rare for the small bm25_top_k=20 pool.
+    # Map node_id ranking back to compound refs
     node_to_refs: dict[str, list[str]] = {}
     for c in candidates:
         node_to_refs.setdefault(c["node_id"], []).append(_ref(c))
@@ -129,7 +123,7 @@ def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
                 llm_ranking_refs.append(ref)
                 used_refs.add(ref)
                 break
-    # Pad missing refs in BM25 order so both rankings span the same candidate set.
+    # Append any refs missing from the LLM ranking in BM25 order
     for ref in bm25_ranking_refs:
         if ref not in used_refs:
             llm_ranking_refs.append(ref)
@@ -142,7 +136,6 @@ def retrieve(query: str, bm25_top_k: int = 20, k_rrf: int = 60,
 
     steps["rerank"] = step_metrics(t_step, snap)
 
-    # Stage 3 RRF fusion over compound refs.
     fused_refs, rrf_scores = rrf_fuse(
         bm25_ranking_refs, llm_ranking_refs, k_rrf=k_rrf, top_k=top_k,
     )

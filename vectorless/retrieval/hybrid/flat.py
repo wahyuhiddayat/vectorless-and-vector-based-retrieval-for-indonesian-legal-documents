@@ -1,20 +1,8 @@
 """Hybrid flat retrieval for Indonesian legal QA.
 
-BM25 global search across all leaf nodes, followed by LLM listwise reranking.
-No tree structure is used. This is the flat variant of hybrid retrieval.
-
-Stage 1: BM25 search across ALL leaf nodes (same corpus as bm25-flat).
-Stage 2: LLM ranks all BM25 candidates from most to least relevant. Candidates
-         are passed in BM25 order and carry a `bm25_rank` field, so the model
-         can use the first-stage ranking as an explicit prior rather than a
-         hidden positional signal. Aligned with mainstream hybrid-rerank
-         practice (Cohere Rerank, Voyage Rerank, RankGPT sliding window,
-         LegalBench-RAG baselines), and avoids the non-determinism of an
-         unseeded pre-rerank shuffle.
-
-Unlike the tree-based hybrid strategy that navigates within a selected doc,
-this variant searches the full leaf node corpus directly, eliminating the
-doc selection bottleneck where a wrong doc pick causes total miss.
+BM25 global search across all leaf nodes, followed by LLM listwise
+reranking. Candidates are passed to the LLM in BM25 order with an
+explicit bm25_rank field.
 
 Usage:
     python -m vectorless.retrieval.hybrid.flat "Apa syarat penyadapan?"
@@ -36,7 +24,20 @@ from ..common import (
 
 def flat_bm25_candidates(query: str, leaves: list[dict], top_k: int = 20,
                          verbose: bool = True) -> list[dict]:
-    """Return BM25-ranked leaf candidates."""
+    """Score all leaf nodes with BM25 and return top candidates.
+
+    Each leaf is enriched with doc_title, navigation_path, text, and
+    penjelasan before tokenization.
+
+    Args:
+        query: Legal question in Indonesian.
+        leaves: All leaf nodes loaded from the corpus.
+        top_k: Maximum number of candidates to return.
+        verbose: Print ranked candidates to stdout.
+
+    Returns:
+        List of candidate dicts sorted by BM25 score descending.
+    """
     corpus = []
     for leaf in leaves:
         enriched = leaf["doc_title"] + " " + leaf["navigation_path"] + " " + leaf["text"]
@@ -80,15 +81,16 @@ def flat_bm25_candidates(query: str, leaves: list[dict], top_k: int = 20,
 def llm_rerank(query: str, candidates: list[dict]) -> dict:
     """Ask the LLM to rank all candidates from most to least relevant.
 
-    Listwise reranking. The LLM sees all candidates (full text, title,
-    navigation path, penjelasan) in a single prompt and produces a complete
-    ordering. Candidates arrive in BM25 first-stage order and carry an
-    explicit `bm25_rank` field so the model can use the first-stage signal
-    as a prior. The candidate key (the unique id the LLM ranks) is
-    `doc_id/node_id` so cross-doc nodes never collide. Pasal numbers reset
-    per document, so `node_id` alone is not unique across the corpus. The
-    caller validates via `validate_llm_ranking` to drop hallucinations and
-    append missing refs in BM25 order.
+    Each candidate is identified by a compound ref (doc_id/node_id) to
+    avoid collisions across documents. The LLM receives all candidates
+    with full text in a single prompt and produces a complete ordering.
+
+    Args:
+        query: Legal question in Indonesian.
+        candidates: BM25-ranked candidate dicts with text fields.
+
+    Returns:
+        LLM response dict with thinking and ranking fields.
     """
     candidates_for_prompt = []
     for idx, c in enumerate(candidates):
@@ -149,7 +151,20 @@ Aturan:
 
 
 def retrieve(query: str, bm25_top_k: int = 20, verbose: bool = True) -> dict:
-    """Run the global BM25 plus LLM-rerank pipeline for one query."""
+    """Run the full hybrid flat retrieval pipeline.
+
+    Loads all leaf nodes, scores them with BM25, then reranks the
+    top candidates with a single LLM listwise call.
+
+    Args:
+        query: Legal question in Indonesian.
+        bm25_top_k: Number of BM25 candidates passed to LLM reranking.
+        verbose: Print progress to stdout.
+
+    Returns:
+        Dict with query, strategy, candidates, rerank result, sources,
+        and metrics.
+    """
     reset_counters()
     t_start = time.time()
     steps: dict = {}
@@ -177,12 +192,8 @@ def retrieve(query: str, bm25_top_k: int = 20, verbose: bool = True) -> dict:
     snap = snapshot_counters()
     t_step = time.time()
 
-    # Pass candidates in BM25 order so the LLM sees the first-stage rank as a
-    # prior (exposed via the `bm25_rank` field in the prompt). See module docstring.
     rerank_result = llm_rerank(query, candidates)
 
-    # Track hallucinations before validation. Refs are doc_id/node_id so cross-doc
-    # collisions on bare node_id (Pasal numbers reset per doc) cannot mask candidates.
     raw_ranking = rerank_result.get("ranking", [])
     valid_refs = {f"{c['doc_id']}/{c['node_id']}" for c in candidates}
     n_hallucinated = sum(1 for r in raw_ranking if r not in valid_refs)
@@ -251,8 +262,9 @@ def retrieve(query: str, bm25_top_k: int = 20, verbose: bool = True) -> dict:
 
 
 def main():
+    """CLI entry point for hybrid flat retrieval."""
     ap = argparse.ArgumentParser(
-        description="Hybrid-flat retrieval (BM25 global + LLM rerank) for Indonesian legal QA")
+        description="Hybrid flat retrieval (BM25 + LLM rerank) for Indonesian legal QA")
     ap.add_argument("query", help="Legal question in Indonesian")
     ap.add_argument("--bm25_top_k", type=int, default=20,
                     help="Max BM25 candidates for LLM reranking (default: 20)")
