@@ -1,9 +1,5 @@
 """Leaf text length distribution per granularity.
 
-Output:
-  - stdout: per-granularity summary table
-  - scripts/analysis/leaf_text_lengths_output.json: full distribution data
-
 Usage:
     python scripts/analysis/leaf_text_lengths.py
 """
@@ -22,6 +18,8 @@ def analyze_granularity(granularity: str) -> dict:
         try:
             doc = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
+            continue
+        if not isinstance(doc, dict):
             continue
 
         def walk(nodes):
@@ -68,6 +66,7 @@ def analyze_granularity(granularity: str) -> dict:
 
 
 def main() -> None:
+    """CLI entry point for leaf text length analysis."""
     results = {}
     for gran in ["pasal", "ayat", "rincian"]:
         r = analyze_granularity(gran)

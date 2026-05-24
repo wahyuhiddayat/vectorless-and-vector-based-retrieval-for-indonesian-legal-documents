@@ -1,12 +1,7 @@
 """Tree depth and branching statistics across granularities.
 
-Scans index_{pasal,ayat,rincian} and reports depth distribution, branching
-factors, and leaf counts. Used to justify beam width and max_rounds defaults
-in bm25-tree retrieval.
-
-Output:
-  - stdout: per-granularity summary table
-  - data/tree_depth_stats.json: full per-doc results for thesis appendix
+Scans each index directory and reports depth distribution, branching
+factors, and leaf counts per document and per granularity.
 
 Usage:
     python scripts/analysis/tree_depth_stats.py
@@ -61,7 +56,9 @@ def compute_granularity_stats(granularity: str) -> dict:
     for path in paths:
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as e:
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
             continue
         doc_id = doc.get("doc_id", path.stem)
         structure = doc.get("structure") or []
@@ -122,6 +119,7 @@ def compute_granularity_stats(granularity: str) -> dict:
 
 
 def main() -> None:
+    """CLI entry point for tree depth statistics."""
     ap = argparse.ArgumentParser(description="Tree depth and branching statistics across granularities")
     ap.add_argument("--output", default="scripts/analysis/tree_depth_stats_output.json", help="Output path for full JSON (default: scripts/analysis/tree_depth_stats_output.json)")
     args = ap.parse_args()

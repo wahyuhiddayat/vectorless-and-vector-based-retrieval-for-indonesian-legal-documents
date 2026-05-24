@@ -1,7 +1,7 @@
 {
   "pasal": {
     "granularity": "pasal",
-    "n_files": 308,
+    "n_files": 309,
     "n_docs": 308,
     "n_empty": 0,
     "empty_docs": [],
@@ -2241,7 +2241,7 @@
   },
   "ayat": {
     "granularity": "ayat",
-    "n_files": 308,
+    "n_files": 309,
     "n_docs": 308,
     "n_empty": 0,
     "empty_docs": [],
@@ -4532,7 +4532,7 @@
   },
   "rincian": {
     "granularity": "rincian",
-    "n_files": 308,
+    "n_files": 310,
     "n_docs": 308,
     "n_empty": 0,
     "empty_docs": [],
