@@ -1,18 +1,9 @@
 """Canonical BPK category registry.
 
-Each Category bundles BPK jenis_id, short folder name, scope group, and
-parser model. Scraper derives JENIS_MAP and KATEGORI_MAP from this tuple.
-Parser resolves the per-doc model via parse_model_for_category().
-
-Adding a category = one Category() entry. Removing = delete the entry.
-No other config files to touch.
-
-Parser model selection rationale.
-  - All active BPK categories use DEFAULT_PARSER_MODEL (gpt-5).
-  - The category registry still carries parser_model so future category
-    overrides can be explicit, but no current category overrides it.
-  - Cross-family validation is preserved because the parser is OpenAI and
-    the parser judge is Vertex Gemini 2.5 Pro.
+Each Category bundles BPK jenis_id, short folder name, scope group,
+and parser model. JENIS_MAP and KATEGORI_MAP are derived from this
+tuple. Adding or removing a category only requires changing the
+CATEGORIES tuple.
 """
 from dataclasses import dataclass
 
@@ -21,20 +12,16 @@ DEFAULT_PARSER_MODEL = "gpt-5"
 
 @dataclass(frozen=True)
 class Category:
-    """One BPK category and the metadata downstream pipelines need.
+    """One BPK category with its metadata.
 
     Attributes:
         jenis_id: BPK Search API jenis parameter value.
-        folder: Short uppercase folder name used in data/<stage>/<folder>/.
-        scope: Broad scope group, one of "Pusat", "Daerah",
-            "Kementerian/Lembaga".
-        parser_model: Model name passed to the LLM dispatcher when parsing
-            documents in this category. Defaults to DEFAULT_PARSER_MODEL.
-        prefix: Doc-id prefix used to map a scraped doc_id back to this
-            category (`vectorless.ids.doc_category`). When empty, derived
-            from the folder name. Override for categories where the
-            scraped slug doesn't match the folder, e.g. `PERMENAG` slugs
-            as `peraturan-menag` and `PERATURAN_MA` slugs as `perma`.
+        folder: Short uppercase folder name used in data paths.
+        scope: One of "Pusat", "Daerah", "Kementerian/Lembaga".
+        parser_model: LLM model for parsing documents in this category.
+        prefix: Doc-id prefix for mapping doc_ids back to this category.
+            When empty, derived from the folder name. Override when the
+            scraped slug differs from the folder name.
     """
 
     jenis_id: int
@@ -94,10 +81,5 @@ _PARSER_BY_FOLDER: dict[str, str] = {
 
 
 def parse_model_for_category(folder: str) -> str:
-    """Return the parser model pinned for this folder.
-
-    Falls back to DEFAULT_PARSER_MODEL when the folder is unknown, which
-    keeps ad-hoc parser runs (without a registered category) on the safe
-    default rather than failing.
-    """
+    """Return the parser model for this folder, or DEFAULT_PARSER_MODEL."""
     return _PARSER_BY_FOLDER.get((folder or "").upper(), DEFAULT_PARSER_MODEL)

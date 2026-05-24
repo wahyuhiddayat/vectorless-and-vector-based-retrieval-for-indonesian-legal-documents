@@ -1,18 +1,8 @@
-"""Multi-vendor LLM client + token accounting for indexing and retrieval.
+"""Multi-vendor LLM client with token accounting.
 
-Routes by model name prefix:
-  gpt-*, o1, o3, o4   -> OpenAI Chat Completions
-  claude-*            -> Anthropic Messages API
-  gemini-*            -> Google GenAI on Vertex AI
-  deepseek-*          -> DeepSeek (OpenAI-compatible) Chat Completions
-
-Public surface (unchanged from prior single-vendor impl):
-  client(), call(prompt, model, ...), get_stats(), reset_counters(),
-  snapshot_counters(), step_metrics(t_start, snap_before)
-
-JSON-mode is enforced where the backend supports it. For Anthropic the
-prompt itself must request JSON output; the retry loop catches parse
-failures and retries.
+Routes by model name prefix to OpenAI, Anthropic, Vertex AI Gemini,
+or DeepSeek. All calls return parsed JSON with automatic retries on
+transient errors and parse failures.
 """
 
 import json
@@ -105,11 +95,7 @@ def _vertex_client():
 
 
 def client():
-    """Return the OpenAI client.
-
-    Kept for backward compatibility with callers that need a raw client
-    handle (e.g. preflight smoke tests). Prefer call() for normal use.
-    """
+    """Return the OpenAI client for backward-compatible callers."""
     return _openai_client()
 
 
@@ -132,6 +118,7 @@ def _supports_openai_reasoning(model: str) -> bool:
 
 
 def _track(input_tokens: int, output_tokens: int) -> None:
+    """Accumulate token counts and increment the call counter."""
     global _input_tokens, _output_tokens, _calls
     with _lock:
         _input_tokens += input_tokens or 0
@@ -140,6 +127,7 @@ def _track(input_tokens: int, output_tokens: int) -> None:
 
 
 def reset_counters() -> None:
+    """Reset all token and call counters to zero."""
     global _input_tokens, _output_tokens, _calls
     with _lock:
         _input_tokens = 0
@@ -148,6 +136,7 @@ def reset_counters() -> None:
 
 
 def get_stats() -> dict:
+    """Return current token and call statistics."""
     return {
         "llm_calls": _calls,
         "input_tokens": _input_tokens,
@@ -157,6 +146,7 @@ def get_stats() -> dict:
 
 
 def snapshot_counters() -> dict:
+    """Snapshot current counters for computing per-step deltas."""
     return {
         "llm_calls": _calls,
         "input_tokens": _input_tokens,
@@ -165,6 +155,7 @@ def snapshot_counters() -> dict:
 
 
 def step_metrics(t_start: float, snap_before: dict) -> dict:
+    """Compute elapsed time and token deltas since a snapshot."""
     snap_after = snapshot_counters()
     return {
         "elapsed_s": round(time.time() - t_start, 3),
@@ -210,11 +201,7 @@ def _call_openai(prompt: str, model: str, max_tokens: int,
 
 def _call_anthropic(prompt: str, model: str, max_tokens: int,
                     system: str | None = None) -> tuple[str, int, int]:
-    """One Anthropic Messages call. Returns (text, input_tokens, output_tokens).
-
-    Anthropic has no native JSON-mode; rely on prompt to request JSON and
-    on the outer retry loop to recover from parse failures.
-    """
+    """One Anthropic Messages call. Returns (text, input_tokens, output_tokens)."""
     if system:
         prompt = system + "\n\n" + prompt
     cli = _anthropic_client()
@@ -234,16 +221,9 @@ def _call_deepseek(prompt: str, model: str, max_tokens: int,
                    system: str | None = None) -> tuple[str, int, int]:
     """One DeepSeek Chat Completions call. Returns (text, input_tokens, output_tokens).
 
-    Uses OpenAI-compatible endpoint at api.deepseek.com. JSON output mode is
-    supported for both v4-flash and v4-pro. Thinking is disabled here to
-    mirror gpt-5's `reasoning_effort="minimal"` for structured-extraction
-    callers (parser, judge): empirically the V4 default thinking=on bloats
-    output ~5x without quality lift on prompt-driven JSON tasks.
-
-    When `system` is provided, it becomes a separate system message placed
-    before the user message. DeepSeek auto-caches by prefix matching, so
-    consecutive calls sharing the same system content get prefix-cache hits
-    at $0.0028/1M instead of $0.14/1M.
+    When system is provided, it is sent as a separate system message
+    for prefix-cache benefits. Thinking is disabled for structured
+    JSON output.
     """
     cli = _deepseek_client()
     messages = []
@@ -311,17 +291,22 @@ def call(prompt: str, *, model: str = MODEL, max_retries: int = 8,
          max_completion_tokens: int = 16384,
          return_usage: bool = False,
          system: str | None = None) -> dict | tuple[dict, dict]:
-    """Send prompt to the configured LLM, return parsed JSON.
+    """Send a prompt to the configured LLM and return parsed JSON.
 
-    Routes by model prefix to OpenAI, Anthropic, Vertex Gemini, or DeepSeek.
-    Retries transient errors and non-JSON responses up to max_retries times
-    with exponential backoff.
+    Retries transient errors and non-JSON responses with exponential
+    backoff. When return_usage is True, returns (json_dict, usage_dict).
 
-    When `system` is provided, DeepSeek places it as a separate system message
-    for prefix-cache benefits. Other backends prepend it to the user prompt.
+    Args:
+        prompt: User message content.
+        model: Model name, routed by prefix to the appropriate backend.
+        max_retries: Maximum retry attempts on transient errors.
+        max_completion_tokens: Maximum tokens in the LLM response.
+        return_usage: If True, return a (result, usage) tuple.
+        system: Optional system message. DeepSeek sends it as a separate
+            message, other backends prepend it to the prompt.
 
-    With return_usage=True, returns (json_dict, usage_dict) for caller-local
-    accounting.
+    Returns:
+        Parsed JSON dict, or (dict, usage_dict) if return_usage is True.
     """
     last_exc: Exception | None = None
     for attempt in range(max_retries):
@@ -330,7 +315,7 @@ def call(prompt: str, *, model: str = MODEL, max_retries: int = 8,
                                                   system=system)
             _track(in_tok, out_tok)
 
-            # Strip markdown fences in case the model wraps despite JSON mode.
+            # Strip markdown fences wrapping the JSON response
             if text.startswith("```"):
                 lines = text.split("\n")
                 text = "\n".join(lines[1:-1])

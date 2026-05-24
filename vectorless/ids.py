@@ -1,19 +1,9 @@
-"""Document-id parsing utilities shared by indexing and retrieval.
-
-`doc_category(doc_id)` maps a doc_id like `peraturan-kpu-15-2024` to the
-canonical jenis folder (`PERATURAN_KPU`). It uses the doc_id_prefix on
-each `Category` entry in `vectorless.categories.CATEGORIES`, so adding a
-new category in one place automatically wires the prefix lookup here.
-"""
+"""Document-id parsing utilities shared by indexing and retrieval."""
 from .categories import CATEGORIES
 
 
 def _build_prefix_table() -> list[tuple[str, str]]:
-    """Return [(prefix, folder)] sorted by prefix length descending.
-
-    Longer prefixes win on ambiguous matches (e.g. `permen-atr-kepala-bpn-`
-    must take precedence over a hypothetical shorter `permen-atr-`).
-    """
+    """Return (prefix, folder) pairs sorted longest prefix first."""
     table = [(c.doc_id_prefix(), c.folder) for c in CATEGORIES]
     return sorted(table, key=lambda pair: -len(pair[0]))
 
@@ -22,11 +12,9 @@ _PREFIX_TABLE = _build_prefix_table()
 
 
 def doc_category(doc_id: str) -> str:
-    """Map doc_id to its category folder (e.g. `uu-1-2025` -> `UU`).
+    """Map a doc_id to its category folder (e.g. "uu-1-2025" to "UU").
 
-    Raises ValueError when no registered Category prefix matches; this
-    surfaces unregistered scraper output instead of silently falling back
-    to the wrong folder.
+    Raises ValueError if no registered Category prefix matches.
     """
     low = doc_id.lower()
     for prefix, folder in _PREFIX_TABLE:
