@@ -3,16 +3,6 @@
 Cross-references raw PDFs, registry, all 3 index granularities, and judge
 verdicts. Writes a per-doc status into `data/corpus_status.json`. Decides
 GT eligibility from the judge verdict.
-
-Eligibility policy.
-  KEEP    judge verdict in {OK, MINOR}
-  DROP    judge verdict in {MAJOR, FAIL, ERROR}
-  KEEP    no judge entry yet (treated as not-yet-judged, not as failure)
-
-Public entries: `build_status() -> dict`, `write_status(status)`, and
-`reconcile(status, dry_run=False)`. CLI access (with --reconcile/--dry-run/--json
-flags and a printed summary) lives at `scripts/parser/corpus_status.py`.
-This module is library-only.
 """
 from __future__ import annotations
 
@@ -76,9 +66,9 @@ def _raw_metadata_paths(category: str, doc_id: str) -> list[Path]:
 def _eligible(verdict: str | None, raw_pdf: bool, fully_indexed: bool) -> tuple[bool, str | None]:
     """Return (eligible_for_gt, skip_reason).
 
-    None verdict means not yet judged. Such a doc is eligible only if its
-    artifacts are coherent (has raw PDF and is fully indexed). A registry
-    entry with no raw and no index is an orphan, treat as ineligible.
+    A None verdict means not yet judged. Such a doc is eligible only if its
+    artifacts are coherent, meaning it has a raw PDF and is fully indexed. A
+    registry entry with no raw PDF and no index is an orphan and ineligible.
     """
     if verdict in KEEP_VERDICTS:
         return True, None

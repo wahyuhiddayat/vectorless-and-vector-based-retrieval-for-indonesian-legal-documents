@@ -1,3 +1,4 @@
+"""Structural verification checks for indexed legal documents."""
 import argparse
 import json
 import re
@@ -62,15 +63,15 @@ def check_title_quality(structure: list[dict]) -> list[str]:
         if not title:
             continue
         nid = node.get("node_id", "?")
-        # "Pasal 5684" — 3+ digit number ending in 4 (likely OCR'd 'A')
+        # "Pasal 5684", 3+ digit number ending in 4 (likely OCR'd 'A')
         if re.search(r'Pasal\s+\d{3,}4\b', title):
             issues.append(
-                f"Possible OCR in title {nid}: 'Pasal ...4' may be 'Pasal ...A' — '{title[:80]}'"
+                f"Possible OCR in title {nid}: 'Pasal ...4' may be 'Pasal ...A', '{title[:80]}'"
             )
-        # "Pasal 1l" or "Pasal 1I" — lowercase l or uppercase I at end (likely OCR'd digit)
+        # "Pasal 1l" or "Pasal 1I", lowercase l or uppercase I at end (likely OCR'd digit)
         if re.search(r'Pasal\s+\d+[lI]\b', title):
             issues.append(
-                f"Possible OCR in title {nid}: 'Pasal ...l/I' may be 'Pasal ...1' — '{title[:80]}'"
+                f"Possible OCR in title {nid}: 'Pasal ...l/I' may be 'Pasal ...1', '{title[:80]}'"
             )
     return issues
 
@@ -79,7 +80,7 @@ def check_angka_count(structure: list[dict], element_counts: dict) -> list[str]:
     """Verify that the number of Angka nodes in the tree matches element_counts['angka'].
 
     A mismatch means the parser detected N Angka in the PDF but the built structure
-    has a different count — indicating missed or duplicate Angka nodes.
+    has a different count, indicating missed or duplicate Angka nodes.
     """
     reported = element_counts.get("angka", 0)
     if reported == 0:
@@ -103,7 +104,6 @@ def check_nav_paths(nodes: list[dict], ancestors: list[str] | None = None) -> li
         ancestors = []
     issues = []
     status_issues = []
-    # Check each node's navigation_path against its reconstructed ancestor chain.
     for node in nodes:
         expected = " > ".join(ancestors + [node["title"]])
         actual = node.get("navigation_path", "")
@@ -121,7 +121,6 @@ def check_page_boundaries(nodes: list[dict], parent_start=None, parent_end=None)
     boundaries are sane.
     """
     issues = []
-    # Check each node for inverted page boundaries.
     for node in nodes:
         start = node.get("start_index")
         end = node.get("end_index")
@@ -241,12 +240,12 @@ def check_preamble(structure: list[dict]) -> list[str]:
                 # At rincian granularity, child titles reveal the numbering.
                 title = first_child.get("title", "")
                 if re.match(r'Mengingat Angka [2-9]', title):
-                    issues.append(f'Preamble: Mengingat starts at "{title}" — angka 1 missing (absorbed into Menimbang?)')
+                    issues.append(f'Preamble: Mengingat starts at "{title}", angka 1 missing (absorbed into Menimbang?)')
             else:
                 # At pasal/ayat granularity, check the raw text start.
                 first_text = mengingat.get("text", "")
                 if re.match(r'\s*2\.', first_text):
-                    issues.append('Preamble: Mengingat text starts at "2." — first point missing (absorbed into Menimbang?)')
+                    issues.append('Preamble: Mengingat text starts at "2.", first point missing (absorbed into Menimbang?)')
 
             # Mengingat should contain either numbered points ("1. Pasal...") or a direct legal
             # reference ("Pasal ...", "Undang-Undang ..."). Simple Perpres documents often skip numbering.
@@ -354,7 +353,6 @@ def categorize_warnings(warnings: list[str]) -> dict:
     Returns a dict with counts for: non_monotonic, gap, llm_failure, other.
     """
     cats = {"non_monotonic": 0, "gap": 0, "llm_failure": 0, "other": 0}
-    # Classify each warning string by its content.
     for w in warnings:
         if "appears after" in w:
             cats["non_monotonic"] += 1
@@ -382,11 +380,9 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
     status_issues = []
     checks = {}
 
-    # Check 1: Categorize parser warnings.
     warn_cats = categorize_warnings(warnings)
     checks["warnings"] = {"count": len(warnings), "categories": warn_cats}
 
-    # Check 2: Pasal count — compare reported vs actual leaf nodes.
     leaves = collect_leaves(structure)
     pasal_leaves = [l for l in leaves if re.match(r"Pasal\s+", l.get("title", ""))]
     reported_pasal = element_counts.get("pasal", 0)
@@ -396,12 +392,10 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
         "pasal_leaves": len(pasal_leaves),
     }
 
-    # Check 3: Leaf quality — empty, short, long text, OCR leaks.
     empty_text = 0
     short_text = 0
     long_text = 0
     ocr_leaks = 0
-    # Scan every leaf node for text quality issues.
     for leaf in leaves:
         text = leaf.get("text", "")
         if not text:
@@ -442,7 +436,6 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
         issues.append(issue)
         status_issues.append(issue)
 
-    # Check 4: Navigation path consistency.
     nav_issues = check_nav_paths(structure)
     checks["nav_path_mismatches"] = len(nav_issues)
     if nav_issues:
@@ -450,7 +443,6 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
         if len(nav_issues) > 3:
             issues.append(f"...and {len(nav_issues) - 3} more nav mismatches")
 
-    # Check 5: Page boundary sanity (start_index <= end_index).
     boundary_issues = check_page_boundaries(structure)
     checks["boundary_issues"] = len(boundary_issues)
     if boundary_issues:
@@ -461,7 +453,6 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
             issues.append(more_issue)
             status_issues.append(more_issue)
 
-    # Check 6: Duplicate node IDs.
     all_ids = []
     def collect_ids(nodes):
         for n in nodes:
@@ -476,7 +467,6 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
         issues.append(issue)
         status_issues.append(issue)
 
-    # Check 7: Preamble integrity (Menimbang/Mengingat/Menetapkan boundaries and content).
     preamble_issues = check_preamble(structure)
     checks["preamble_issues"] = len(preamble_issues)
     if preamble_issues:
@@ -489,23 +479,19 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
         issues.extend(amendment_issues)
         status_issues.extend(amendment_issues)
 
-    # Check 8: Title quality — detect OCR'd pasal refs in node titles.
     title_issues = check_title_quality(structure)
     checks["title_quality_issues"] = len(title_issues)
     if title_issues:
         issues.extend(title_issues)
         status_issues.extend(title_issues)
 
-    # Check 9: Angka count consistency — structure vs element_counts.
-    # Only applicable at pasal granularity: ayat/rincian deep_split_leaves creates extra
-    # Angka sub-nodes from definition lists that don't appear in element_counts.
+    # Only at pasal granularity, where element_counts is reliable.
     angka_count_issues = check_angka_count(structure, element_counts) if granularity == "pasal" else []
     checks["angka_count_issues"] = len(angka_count_issues)
     if angka_count_issues:
         issues.extend(angka_count_issues)
         status_issues.extend(angka_count_issues)
 
-    # Determine overall status from issue severity.
     if empty_text or dupes or len(boundary_issues) > 0:
         status = "FAIL"
     elif (len(warnings) > 0 or ocr_leaks > 0 or len(preamble_issues) > 0
@@ -543,7 +529,6 @@ def verify_index(index_dir: Path, doc_id: str | None = None, category: str | Non
 
     results = []
     categories = normalize_categories(category)
-    # Walk all JSON files in the index directory.
     for path in sorted(index_dir.rglob("*.json")):
         if path.name.startswith("catalog"):
             continue
@@ -569,7 +554,6 @@ def cross_granularity_check(doc_id: str) -> list[str]:
     """
     issues = []
     counts = {}
-    # Load leaf count from each available granularity index.
     for gran, idx_dir in GRANULARITY_INDEX_MAP.items():
         low = doc_id.lower()
         if low.startswith("peraturan-bssn-"):
@@ -607,7 +591,6 @@ def print_report(results: list[dict], index_dir: Path):
     print(f"{'='*60}\n")
 
     ok = warn = fail = 0
-    # Print one line per document, with details for WARN/FAIL.
     for r in results:
         status = r["status"]
         doc_id = r["doc_id"]
@@ -621,7 +604,6 @@ def print_report(results: list[dict], index_dir: Path):
         elif status == "WARN":
             warn += 1
             print(f"[WARN] {doc_id:30s}  {leaves:4d} leaves, {issue_count} issues, {parser_warn_count} parser warnings")
-            # Build a compact summary of warning categories.
             cats = r["checks"]["warnings"]["categories"]
             lq = r["checks"]["leaf_quality"]
             parts = []
@@ -678,7 +660,6 @@ def main():
     )
 
     all_results = {}
-    # Run verification on each requested granularity.
     for gran in granularities:
         index_dir = GRANULARITY_INDEX_MAP[gran]
         if not index_dir.exists():
@@ -691,12 +672,10 @@ def main():
         if not args.json:
             print_report(results, index_dir)
 
-    # Cross-granularity: compare leaf counts across pasal/ayat/rincian.
     if args.all and not args.json:
         pasal_dir = GRANULARITY_INDEX_MAP["pasal"]
         if pasal_dir.exists():
             doc_ids = set()
-            # Collect all doc_ids from the pasal index as the reference set.
             for path in pasal_dir.rglob("*.json"):
                 if path.name not in ("catalog.json", "catalog_gt.json"):
                     with open(path, encoding="utf-8") as f:
@@ -708,7 +687,6 @@ def main():
                         doc_ids.add(doc["doc_id"])
 
             cross_issues = []
-            # Check each document for leaf count inversions between granularities.
             for did in sorted(doc_ids):
                 issues = cross_granularity_check(did)
                 if issues:

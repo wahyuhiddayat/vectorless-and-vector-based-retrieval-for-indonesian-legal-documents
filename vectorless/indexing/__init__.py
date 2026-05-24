@@ -1,10 +1,4 @@
-"""Indexing pipeline package.
-
-Public surface for shared constants. Per-stage modules (llm_parse, ocr,
-summary, judge, corpus_status, status, verify, build) import the canonical
-values from here so we never have two diverging copies of the same map or
-version string.
-"""
+"""Indexing pipeline package. Exports shared constants and version strings."""
 from pathlib import Path
 
 GRANULARITY_INDEX_MAP: dict[str, Path] = {

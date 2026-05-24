@@ -1,12 +1,8 @@
-"""Annotate an indexed document tree with per-node `summary` fields.
+"""Annotate an indexed document tree with per-node summary fields.
 
-Walks the parsed tree at one granularity. Leaf summaries call the LLM with
-the leaf text. Internal-node summaries call the LLM with the children's
-titles + summaries (so the parent describes its scope, not its raw text).
-The mutated tree is written back to the same path.
-
-Public entry: `annotate_doc(doc_id, granularity="pasal", force=False, verbose=True)`.
-CLI access lives at `scripts/parser/add_node_summary.py`. Library-only.
+Walks the parsed tree bottom-up at one granularity. Leaf summaries are
+generated from leaf text, internal-node summaries from their children's
+titles and summaries. The mutated tree is written back to the same path.
 """
 from __future__ import annotations
 
@@ -56,6 +52,7 @@ Balas dalam JSON:
 
 
 def _accumulate(usage_acc: dict, lock: threading.Lock, usage: dict) -> None:
+    """Thread-safe addition of one LLM call's token counts into the accumulator."""
     with lock:
         usage_acc["input_tokens"] += usage["input_tokens"]
         usage_acc["output_tokens"] += usage["output_tokens"]
@@ -63,6 +60,7 @@ def _accumulate(usage_acc: dict, lock: threading.Lock, usage: dict) -> None:
 
 
 def _summarise_leaf(node: dict, usage_acc: dict, lock: threading.Lock) -> str:
+    """Generate a 1-2 sentence summary for a leaf node via the LLM."""
     text = (node.get("text") or "").strip()
     if not text:
         return ""
@@ -78,6 +76,7 @@ def _summarise_leaf(node: dict, usage_acc: dict, lock: threading.Lock) -> str:
 
 def _summarise_internal(node: dict, child_pairs: list[tuple[str, str]],
                         usage_acc: dict, lock: threading.Lock) -> str:
+    """Generate a one-sentence scope summary for an internal node from its children."""
     children_text = "\n".join(f"- {t}: {s}" for t, s in child_pairs if s)
     if not children_text:
         return ""
@@ -92,6 +91,7 @@ def _summarise_internal(node: dict, child_pairs: list[tuple[str, str]],
 
 
 def _collect_leaves(nodes: list[dict], force: bool, todo: list[dict], skipped: list[dict]) -> None:
+    """Recursively partition leaf nodes into todo and already-skipped lists."""
     for node in nodes:
         if node.get("nodes"):
             _collect_leaves(node["nodes"], force, todo, skipped)
@@ -103,6 +103,7 @@ def _collect_leaves(nodes: list[dict], force: bool, todo: list[dict], skipped: l
 
 def _walk_internal(nodes: list[dict], counter: dict, force: bool, verbose: bool,
                    usage_acc: dict, lock: threading.Lock) -> None:
+    """Recursively summarize internal nodes bottom-up after leaves are done."""
     for node in nodes:
         children = node.get("nodes")
         if not children:

@@ -8,11 +8,6 @@ Public functions used by the parsing pipeline:
 Plus shared helpers used during LLM output normalization:
   - parse_llm_json(raw) -> dict
   - count_pasals_in_tree(structure) -> int
-
-Owned by `vectorless/indexing/` because the scrape and indexing layers both
-need to look up the PDF for a doc by its registry entry. The legacy
-`scripts/parser/_common.py` and the `find_pdf_path` previously in
-`scripts/_shared/` were both consolidated here.
 """
 from __future__ import annotations
 
@@ -59,12 +54,7 @@ def _load_registry() -> dict:
 
 
 def find_pdf_path(doc_id: str) -> Path | None:
-    """Locate the main PDF for a doc_id via registry metadata.
-
-    Preferred: return `entry["pdf_path"]` (deterministic mapping written by
-    the scraper). Fallback: pattern-match filenames under the jenis folder
-    for legacy registries that lack pdf_path.
-    """
+    """Locate the main PDF for a doc_id via registry metadata or filename pattern."""
     registry = _load_registry()
     entry = registry.get(doc_id)
     if not entry:

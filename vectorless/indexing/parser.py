@@ -210,9 +210,8 @@ def fix_ocr_artifacts(text: str) -> str:
 def _normalize_ocr_digits(s: str) -> str:
     """Normalize OCR-misread characters in a potential digit string.
 
-    Maps: O → 0, l → 1, I → 1. Strips spaces before normalizing (handles "9 I").
-    Returns the normalized string only if the result is purely numeric;
-    otherwise returns the original string unchanged to avoid false substitutions.
+    Maps O to 0, l to 1, I to 1. Returns the normalized string only if the
+    result is purely numeric, otherwise returns the original unchanged.
     """
     s_nospace = s.replace(' ', '')
     normalized = ''
@@ -233,7 +232,7 @@ def _normalize_ocr_digits(s: str) -> str:
 
 def find_penjelasan_page(pages: list[dict]) -> int | None:
     """Return the page number where PENJELASAN starts, or None if not found."""
-    # Raw text — PENJELASAN headers are usually clean OCR.
+    # Raw text. PENJELASAN headers are usually clean OCR.
     for page in pages:
         text = page["raw_text"]
         if re.search(r'PENJ\S*SAN\s*\n\s*ATAS', text):
@@ -260,7 +259,7 @@ def detect_perubahan(pages: list[dict]) -> bool:
     if not pages:
         return False
 
-    # First 3 pages — OCR can shuffle page order.
+    # First 3 pages. OCR can shuffle page order.
     for page in pages[:3]:
         text = page["raw_text"]
         # \s* tolerates OCR-glued "TENTANGPERUBAHAN".
@@ -274,7 +273,7 @@ def detect_perubahan(pages: list[dict]) -> bool:
         if re.search(r'PERUBAHAN|YESUAIAN', title_text, re.IGNORECASE):
             return True
 
-        # "ATAS UNDANG-UNDANG" / "ATAS PERATURAN" — OCR dropped "PERUBAHAN".
+        # "ATAS UNDANG-UNDANG" / "ATAS PERATURAN". OCR dropped "PERUBAHAN".
         if re.search(r'ATAS\s+UNDANG|ATAS\s+PERATURAN', title_text, re.IGNORECASE):
             return True
 
@@ -344,7 +343,7 @@ def _consume_stacked_pasal(lines: list[str], start_idx: int) -> tuple[list[str] 
     """Rebuild vertically-stacked bare "Pasal" lines into proper Pasal-N groups.
 
     PyMuPDF reads compact Penjelasan columns vertically, producing e.g.
-    "Pasal\\nPasal\\n51\\ncukup jelas.\\n52\\ncukup jelas." — N bare "Pasal"
+    "Pasal\\nPasal\\n51\\ncukup jelas.\\n52\\ncukup jelas.". N bare "Pasal"
     headers, then N numbers interleaved with their text.
 
     Returns (rebuilt_lines, next_index) on success, or (None, start_idx+1) if
@@ -448,7 +447,7 @@ def _fix_penjelasan_columns(text: str) -> str:
             i = next_i
             continue
 
-        # Bare number on its own line — only treat as Pasal if part of a sequence of 2+.
+        # Bare number on its own line. Only treat as Pasal if part of a sequence of 2+.
         elif re.match(r'^(\d+)\s*$', stripped):
             rebuilt, next_i = _consume_bare_number_sequence(lines, i)
             if rebuilt is not None:
@@ -463,8 +462,8 @@ def _fix_penjelasan_columns(text: str) -> str:
 
 
 def _clean_penjelasan_text(text: str) -> str:
-    """Remove noise from PENJELASAN text: headers, page markers, and trailing metadata."""
-    # PRESIDEN REPUBLIK INDONESIA headers — same OCR variants as in body text.
+    """Remove noise from PENJELASAN text (headers, page markers, trailing metadata)."""
+    # PRESIDEN REPUBLIK INDONESIA headers, same OCR variants as in body text.
     _PRESIDEN_RE = r'(?:P(?:RE|NE|TT)?SI[DO]EN|FRESIDEN|PRESTDEN|ETIiEILtrN|FTjTJTFiTIilNEEtrtrEIn!|FTIESIDEN)'
     text = re.sub(r'\n?\s*' + _PRESIDEN_RE + r'\s*\n\s*(?:REFUBUK|REPUEUK|REPUBUK|REPUBLIK|REPUBTJK|NEPUBUK|REPI,IBLIK)\s+(?:TNDONESIA|INDONESIA|INDONESI,?A)\s*\n?', '\n', text)
     text = re.sub(r'^\s*' + _PRESIDEN_RE + r'\s*$', '', text, flags=re.MULTILINE)
@@ -645,7 +644,7 @@ def _dedupe_repeated_heading(text: str, title: str | None) -> str:
 
 
 def _strip_leading_title(text: str, title: str | None) -> str:
-    """Remove the node's own title if it leads the text — already in node.title."""
+    """Remove the node's own title if it leads the text, since it is already in node.title."""
     if not title:
         return text
     words = title.strip().split()
@@ -707,34 +706,20 @@ def strip_ocr_headers(nodes: list[dict]):
         if "penjelasan" in node:
             node["penjelasan"] = _normalize_leaf_text(node["penjelasan"], node.get("title"))
 
-# OCR-tolerant helpers for splitting Pasal leaves into Ayat, Huruf, and Angka nodes.
-
 # Patterns for detecting sub-Pasal structure and penjelasan section headings.
-# Huruf: 1-2 letters (handles a..z and doubled aa..zz for lists longer than
-# 26 items), period optional to tolerate OCR loss. Case-insensitive because
-# OCR sometimes capitalizes isolated letters (e.g. "l." → "L "). Sequence
-# validation downstream rejects misfires.
+# Huruf matches 1-2 letters (a..z, aa..zz), period optional for OCR tolerance.
 _HURUF_RE = re.compile(
     r'(?:^|\n)[ \t]*([A-Za-z]{1,2})\.?(?=\s+\S)',
     re.MULTILINE,
 )
-# Sub-huruf: "a) b) c)" style, used inside angka bodies as a deeper level.
+# Sub-huruf "a) b) c)" style, used inside angka bodies as a deeper level.
 _SUB_HURUF_RE = re.compile(r'(?:^|\n)\s*([a-z])\)\s', re.MULTILINE)
 
-# Words that, when appearing at the end of the line immediately before a marker,
-# indicate the marker is part of an inline cross-line reference rather than a
-# structural marker.  Example: "dimaksud pada ayat\n(1) harus" — the "(1)" here
-# is a reference, not the start of Ayat 1.
+# Words before a line break that signal the next-line marker is a cross-reference,
+# not a structural boundary. Conjunctions (dan, atau) are excluded on purpose.
 _INLINE_REF_PREV_WORDS = frozenset([
-    # Prepositional anchors for a cross-reference that can OCR-break to next line.
     'pada', 'di', 'dalam',
-    # Structural nouns — references read "Pasal N ayat (M)" where the next
-    # token may break to the following line.
     'ayat', 'pasal', 'huruf', 'angka',
-    # NOTE: conjunctions like "dan", "atau", "serta", "maupun" are NOT in this
-    # set because Indonesian legal drafting convention uses them as LIST
-    # conjunctions: "f. item; dan\ng. last item." — the "dan" ends a list
-    # item, and the next line IS a structural marker, not an inline ref.
 ])
 
 
@@ -742,8 +727,8 @@ def _is_inline_ref(text: str, match: re.Match) -> bool:
     """Return True if this marker match is a cross-line inline reference.
 
     Detects cases where OCR/PDF line-wrapping splits an inline reference such as
-    "dimaksud pada ayat\\n(1) harus" — the "\\n(1)" looks like an Ayat marker but
-    is actually a continuation of the previous line's reference.
+    "dimaksud pada ayat\\n(1) harus", where the "\\n(1)" looks like an Ayat marker
+    but is actually a continuation of the previous line's reference.
     """
     nl_pos = text.rfind('\n', 0, match.start() + 1)
     if nl_pos == -1:
@@ -760,11 +745,8 @@ _FLAT_AYAT_NORM_RE = re.compile(r'\(\d+\)\s')
 def _normalize_flat_structural_text(text: str) -> str:
     """Insert newlines before structural markers in flat (no-newline) text.
 
-    LLM cleanup sometimes collapses multi-paragraph legal text to a single line,
-    breaking the newline-anchored marker patterns used by _find_and_validate_markers.
-    This recovers structure by:
-    - Inserting \\n before ayat markers (N) not preceded by inline-reference words
-    - Inserting \\n before huruf markers (a., b.) that follow list separators (: or ;)
+    Recovers structure when LLM cleanup collapses multi-paragraph text to a
+    single line, breaking newline-anchored marker patterns.
     """
     if '\n' in text:
         return text  # Already structured, no normalization needed
@@ -794,20 +776,18 @@ def _normalize_flat_structural_text(text: str) -> str:
     return text
 
 
-# Strict marker patterns — only match well-formed tokens. Fast path for
-# clean LLM-produced text. Used before the OCR-tolerant fuzzy variants.
+# Strict marker patterns. Only match well-formed tokens, used as a fast
+# path for clean LLM-produced text before falling back to fuzzy variants.
 _STRICT_AYAT_RE = re.compile(r'(?:^|\n)[ \t]*\((\d+)\)(?=\s|$)', re.MULTILINE)
-# Angka: digits at line start. Accept closing with period ("1."), closing
-# paren ("1)"), or no closing char at all (OCR that drops the period).
-# Sequence validation downstream rejects random digit lines that do not
-# form a consecutive run starting at 1.
+# Angka digits at line start, accepting period or paren closing.
+# Sequence validation rejects non-consecutive runs.
 _STRICT_ANGKA_ITEM_RE = re.compile(
     r'(?:^|\n)[ \t]*(\d+)[.)]?(?=\s+\S)',
     re.MULTILINE,
 )
 
-# Fuzzy marker candidate regex — tolerate common OCR noise around digits.
-# Ayat: digit-ish token optionally wrapped in () or [] with OCR noise.
+# Fuzzy marker candidate regex. Tolerates common OCR noise around digits.
+# Ayat is a digit-ish token optionally wrapped in () or [] with OCR noise.
 #   Accepted: (1), (l), (I), (O), (21, 21), (2l), l2l, t2t, lN), (Nt, etc.
 # The char-class 'OIilot' captures both digits and their common OCR letter
 # substitutes (O/0, I/1, i/1, l/1, o/0, t as paren substitute).
@@ -815,7 +795,7 @@ _FUZZY_AYAT_RE = re.compile(
     r'(?:^|\n)[ \t]*[(\[lt]?[ \t]*(\d[0-9OIilot]{0,2}|[OIilot]\d[OIilot]?|[OIilo])[ \t]*[)\]lt]?(?=\s|$)',
     re.MULTILINE,
 )
-# Angka: digit-ish token followed by period.
+# Angka, digit-ish token followed by period.
 _FUZZY_ANGKA_ITEM_RE = re.compile(
     r'(?:^|\n)[ \t]*(\d[0-9OIilot]{0,2}|[OIilo])\.(?=\s)',
     re.MULTILINE,
@@ -823,7 +803,7 @@ _FUZZY_ANGKA_ITEM_RE = re.compile(
 
 
 def _huruf_to_index(label: str) -> int | None:
-    """Map a huruf label to its 1-based position: a=1..z=26, aa=27..zz=52."""
+    """Map a huruf label to its 1-based position (a=1..z=26, aa=27..zz=52)."""
     lab = label.lower()
     if len(lab) == 1 and "a" <= lab <= "z":
         return ord(lab) - ord("a") + 1
@@ -845,11 +825,10 @@ def _index_to_huruf(i: int) -> str:
 def _find_fuzzy_markers(
     text: str, kind: str, expected_start: str
 ) -> list[tuple[int, str, int]] | None:
-    """OCR-tolerant marker detection for "ayat" / "angka" / "huruf".
+    """OCR-tolerant marker detection for "ayat", "angka", or "huruf".
 
-    Returns (start, normalized_label, end) tuples forming a consecutive sequence,
-    or None. Strict patterns are tried first; on failure, fuzzy candidates are
-    normalized, inline cross-refs are filtered, and one-slot gaps are gap-filled.
+    Returns (start, normalized_label, end) tuples forming a consecutive
+    sequence, or None if no valid sequence is found.
     """
     if kind == "ayat":
         pattern = _FUZZY_AYAT_RE
@@ -894,7 +873,7 @@ def _find_fuzzy_markers(
             ):
                 return dd
         # Ayat only exists as "(N)" in Indonesian legal text. If strict found
-        # no valid consecutive sequence, there ARE no ayats here — do NOT fall
+        # no valid consecutive sequence, there ARE no ayats here. Do NOT fall
         # through to fuzzy (which would match bare digits as ayat labels).
         if kind == "ayat":
             return None
@@ -1088,13 +1067,8 @@ def _split_text_by_markers(
     """Split text at each marker position into labelled segments.
 
     Accepts either 2-tuple (start, label) or 3-tuple (start, label, end).
-    When the 3-tuple is used, the segment starts at `end` (skipping the
-    marker text entirely) so callers don't need to strip OCR-varied
-    marker prefixes. For 2-tuple legacy calls, segment starts at `start`
-    and caller must strip the prefix.
-
-    Returns (intro_text, segments) where intro_text is content before
-    the first marker and segments is a list of (label, segment_text).
+    3-tuple segments start at `end`, skipping the marker text. Returns
+    (intro_text, [(label, segment_text), ...]).
     """
     if not markers:
         return text.strip(), []
@@ -1283,7 +1257,7 @@ def _try_deep_split(text: str, parent_id: str, parent_title: str, parent_start: 
             n.pop("_split_label", None)
         return sub_nodes
 
-    # Try Angka vs Huruf — pick whichever appears EARLIEST in text.
+    # Try Angka vs Huruf. Pick whichever appears EARLIEST in text.
     # Text like "a. ... b. ... h. ... 1. ... 9." should split at a/b/c...
     # (huruf first), letting Huruf h's body recurse into Angka 1-9.
     # Text like "1. Definisi A... 2. Definisi B..." with occasional inner

@@ -1,20 +1,11 @@
-"""Tree-normalization helpers for parsed legal documents.
+"""Tree-normalization helpers for parsed legal document structures.
 
-Functions in this module operate on the LLM parser's output tree
-(`structure: list[dict]` with nested `nodes` children). They post-process
-the structure into the canonical form that downstream consumers (re-split,
-summary, retrieval) expect:
-
-  - rebuild canonical pasal-family titles from node_id (handles OCR drift)
-  - re-derive node_id from title when the LLM produces malformed ids
-  - set navigation_path on every node
-  - backfill start_index/end_index page numbers by matching titles to PDF
-    page text
-
-These helpers were originally embedded in `scripts/parser/llm_parse.py`.
-Moved here so the parser orchestrator stays focused on LLM dispatch and
-chunking, and so other entry points can reuse the helpers without
-importing from a CLI script.
+Functions operate on the LLM parser's output tree (`structure: list[dict]`
+with nested `nodes` children). They post-process the structure into the
+canonical form that downstream consumers (re-split, summary, retrieval)
+expect. Responsibilities include rebuilding canonical pasal-family titles,
+re-deriving node_id from title, setting navigation_path on every node, and
+backfilling start_index/end_index page numbers.
 """
 from __future__ import annotations
 
@@ -49,13 +40,7 @@ def _sanitize_node_id(s: str) -> str:
 
 
 def _canonical_title_from_node_id(node_id: str, original_title: str) -> str:
-    """Rebuild canonical pasal-family title from node_id.
-
-    node_id is LLM-consistent and structural; the title may carry verbatim OCR
-    artifacts. For nested amendment ids (pasal_I_angka_N_pasal_3A), the deepest
-    `pasal` segment wins, so the title reflects the nested Pasal, not the Roman
-    container. BAB/Bagian/Paragraf titles pass through unchanged.
-    """
+    """Rebuild canonical pasal-family title from node_id to fix OCR drift."""
     parts = node_id.split("_")
     last_pasal_idx = -1
     for i, seg in enumerate(parts):

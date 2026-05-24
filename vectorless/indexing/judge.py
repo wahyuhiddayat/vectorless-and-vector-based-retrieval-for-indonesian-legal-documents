@@ -2,12 +2,6 @@
 
 Compares raw PDF text against the parsed pasal-level JSON and produces a
 per-doc report of coverage gaps, structural issues, and OCR corruption.
-Runs on Gemini 2.5 Pro (configured in vectorless/models.py) for
-cross-family verification of the parser. Free under the Vertex AI trial.
-
-Public entry: `judge_doc(doc_id) -> dict`. Batch persistence via
-`_save_reports(reports)` which dedupes against the existing report file.
-CLI access lives at `scripts/parser/judge.py`. This module is library-only.
 """
 from __future__ import annotations
 
@@ -118,6 +112,7 @@ Cap ocr_issues at 10 most impactful samples. Reply with ONLY the JSON."""
 
 
 def _find_index_path(doc_id: str) -> Path | None:
+    """Return the pasal index JSON path for doc_id, or None if not found."""
     for p in INDEX_PASAL.glob(f"*/{doc_id}.json"):
         return p
     return None
@@ -139,11 +134,7 @@ def _pdf_body_text(doc_id: str, body_end: int | None) -> str:
 
 
 def _call_judge(prompt: str) -> tuple[dict, dict]:
-    """Invoke the judge model via the central LLM wrapper.
-
-    Returns (parsed_report, usage_meta). JSON parsing and transient retries
-    are handled inside vectorless.llm.call.
-    """
+    """Return (parsed_report, usage_meta) from the judge model."""
     from ..llm import call as llm_call
 
     t0 = time.time()
@@ -197,6 +188,7 @@ def judge_doc(doc_id: str) -> dict:
 
 
 def _save_reports(reports: list[dict]) -> None:
+    """Merge new reports into the persistent report file, deduplicating by doc_id."""
     existing: dict = {}
     if REPORT_PATH.exists():
         try:

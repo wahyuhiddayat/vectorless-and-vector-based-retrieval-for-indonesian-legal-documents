@@ -1,10 +1,4 @@
-"""Resolve a list of doc_ids from CLI arguments and the registry.
-
-Every CLI entry point in the indexing pipeline takes either explicit
-`--doc-id X` flags or a `--category Y` filter. This module owns that
-resolution so the four CLIs (`vectorless.indexing.build`, plus the
-parser, judge, and granularity-check scripts) share one implementation.
-"""
+"""Resolve a list of doc_ids from CLI arguments and the registry."""
 from __future__ import annotations
 
 import json

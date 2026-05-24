@@ -3,10 +3,7 @@
 Walks every leaf node in a parsed pasal-granularity document, sends each
 text body to the OCR-clean model, and writes the cleaned text back in
 place. Length and marker-count sanity checks reject suspicious cleans
-(likely hallucinations) before they overwrite the original.
-
-Public entry: `clean_doc(doc_id, force=False, verbose=True)`. CLI access
-lives at `scripts/parser/clean_ocr.py`. This module is library-only.
+before they overwrite the original.
 """
 from __future__ import annotations
 
@@ -97,6 +94,7 @@ def _clean_text(text: str, usage_acc: dict, lock: threading.Lock) -> tuple[str, 
 
 
 def _walk_leaves(nodes: list[dict], todo: list[dict], force: bool) -> None:
+    """Recursively collect leaf nodes whose text needs OCR cleaning."""
     for node in nodes:
         if node.get("nodes"):
             _walk_leaves(node["nodes"], todo, force)
@@ -106,6 +104,7 @@ def _walk_leaves(nodes: list[dict], todo: list[dict], force: bool) -> None:
 
 
 def _iter_leaves(nodes: list[dict]):
+    """Yield all leaf nodes that contain text."""
     for node in nodes:
         if node.get("nodes"):
             yield from _iter_leaves(node["nodes"])

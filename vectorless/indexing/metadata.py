@@ -16,7 +16,7 @@ from vectorless.indexing.parser import (
 
 DATA_RAW = Path("data/raw")
 
-# "Perubahan [Ke-N] atas Undang|Peraturan ..." — matches amendment titles only.
+# Matches amendment titles like "Perubahan [Ke-N] atas Undang|Peraturan ..."
 _AMENDMENT_TITLE_RE = re.compile(
     r"\bPerubahan(?:\s+Ke\w+)?\s+[Aa]tas\s+(?:Undang|Peraturan)",
     re.IGNORECASE,
@@ -24,6 +24,7 @@ _AMENDMENT_TITLE_RE = re.compile(
 
 
 def _load_registry() -> dict:
+    """Load and return the full registry dict from data/raw/registry.json."""
     path = DATA_RAW / "registry.json"
     if not path.exists():
         raise FileNotFoundError(f"registry not found at {path}")
@@ -32,6 +33,7 @@ def _load_registry() -> dict:
 
 
 def _load_detail_metadata(doc_id: str, detail_id: str, jenis_folder: str) -> dict | None:
+    """Load per-document detail metadata JSON, or return None if absent."""
     meta_path = DATA_RAW / jenis_folder / "metadata" / f"{doc_id}__{detail_id}.json"
     if not meta_path.exists():
         return None

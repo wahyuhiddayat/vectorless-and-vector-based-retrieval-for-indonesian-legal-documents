@@ -75,14 +75,7 @@ def resplit_one(pasal_doc: dict, granularity: str) -> dict:
 
 
 def _collect_leaf_summaries(structure: list[dict]) -> list[str]:
-    """Walk the tree, return non-empty `summary` text from every leaf node.
-
-    Used by `build_catalog` to enrich each catalog entry with a
-    `doc_summary_text` aggregation. This makes the doc-level BM25 corpus
-    used by tree retrieval methods (bm25-tree, hybrid-tree, llm-agentic)
-    richer than the original 15-20 token metadata-only baseline that
-    caused stage-1 doc-pick to fail in the 2026-05-13 pilot.
-    """
+    """Walk the tree and return non-empty ``summary`` text from every leaf node."""
     summaries: list[str] = []
     for node in structure:
         children = node.get("nodes") or []
@@ -98,10 +91,9 @@ def _collect_leaf_summaries(structure: list[dict]) -> list[str]:
 def build_catalog(index_dir: Path) -> list[dict]:
     """Build the compact catalog stored beside each index.
 
-    Each entry copies the metadata fields in `CATALOG_FIELDS` from the
-    source doc, plus a `doc_summary_text` field aggregating every leaf
-    node's `summary` (joined with newlines). The aggregated field is the
-    primary signal for tree-retrieval stage-1 doc-pick.
+    Each entry copies the metadata fields in ``CATALOG_FIELDS`` from the
+    source doc, plus a ``doc_summary_text`` field aggregating every leaf
+    node's summary joined with newlines.
     """
     catalog = []
     for path in sorted(index_dir.rglob("*.json")):
@@ -135,7 +127,7 @@ def _update_cost_log(granularity: str, doc_id: str, entry: dict) -> None:
 
 
 def _resplit_derived(pasal_path: Path, jenis_folder: str, doc_id: str) -> dict[str, int]:
-    """Re-split a pasal document into its derived granularities."""
+    """Re-split a pasal document into ayat and rincian granularities and write them to disk."""
     with open(pasal_path, encoding="utf-8") as f:
         pasal_doc = json.load(f)
 
@@ -264,6 +256,7 @@ def index_doc(doc_id: str, dry_run: bool = False, resplit_only: bool = False) ->
 
 
 def main() -> None:
+    """CLI entry point for the indexing pipeline."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s  %(levelname)-7s  %(message)s",

@@ -1,3 +1,4 @@
+"""Index status manifest for tracking per-document indexing progress."""
 import argparse
 import json
 from datetime import datetime, UTC
@@ -13,41 +14,50 @@ SCHEMA_VERSION = 1
 
 
 def now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def mtime_iso(path: Path) -> str:
+    """Return the file modification time as an ISO 8601 UTC string."""
     return datetime.fromtimestamp(path.stat().st_mtime, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def load_registry() -> dict:
+    """Load the document registry from disk."""
     with open(REGISTRY_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
 def normalize_categories(category: str | None) -> set[str]:
+    """Parse a comma-separated category string into an uppercase set."""
     if not category:
         return set()
     return {part.strip().upper() for part in category.split(",") if part.strip()}
 
 
 def _empty_verify_status() -> dict:
+    """Return a default verify_status dict with all granularities set to MISSING."""
     return {gran: "MISSING" for gran in GRANULARITY_INDEX_MAP}
 
 
 def _empty_warning_count() -> dict:
+    """Return a default warning_count dict with all granularities zeroed."""
     return {gran: 0 for gran in GRANULARITY_INDEX_MAP}
 
 
 def _empty_parser_warning_count() -> dict:
+    """Return a default parser_warning_count dict with all granularities zeroed."""
     return {gran: 0 for gran in GRANULARITY_INDEX_MAP}
 
 
 def _empty_verify_issue_count() -> dict:
+    """Return a default verify_issue_count dict with all granularities zeroed."""
     return {gran: 0 for gran in GRANULARITY_INDEX_MAP}
 
 
 def load_status_manifest(current_parser_version: str, current_llm_cleanup_version: str) -> dict:
+    """Load or initialize the status manifest, stamping current version metadata."""
     if STATUS_PATH.exists():
         with open(STATUS_PATH, encoding="utf-8") as f:
             manifest = json.load(f)
@@ -77,6 +87,7 @@ def prune_orphan_manifest_entries(manifest: dict, registry: dict) -> None:
 
 
 def write_status_manifest(manifest: dict):
+    """Write the status manifest to disk as JSON."""
     STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
     manifest["generated_at"] = now_iso()
     with open(STATUS_PATH, "w", encoding="utf-8") as f:
@@ -84,6 +95,7 @@ def write_status_manifest(manifest: dict):
 
 
 def ensure_doc_entry(manifest: dict, doc_id: str, registry_entry: dict | None = None) -> dict:
+    """Return the manifest entry for doc_id, creating a default one if absent."""
     docs = manifest.setdefault("docs", {})
     entry = docs.setdefault(doc_id, {
         "doc_id": doc_id,
@@ -118,6 +130,7 @@ def ensure_doc_entry(manifest: dict, doc_id: str, registry_entry: dict | None = 
 
 
 def _index_path(granularity: str, doc_id: str) -> Path:
+    """Build the filesystem path for a document's index JSON at the given granularity."""
     low = doc_id.lower()
     if low.startswith("peraturan-bssn-"):
         category = "PERATURAN_BSSN"
@@ -129,6 +142,7 @@ def _index_path(granularity: str, doc_id: str) -> Path:
 
 
 def _load_doc_json(path: Path) -> dict | None:
+    """Load a JSON document from path, returning None if the file does not exist."""
     if not path.exists():
         return None
     with open(path, encoding="utf-8") as f:
@@ -136,6 +150,7 @@ def _load_doc_json(path: Path) -> dict | None:
 
 
 def is_cleanup_stale(entry: dict, current_llm_cleanup_version: str) -> bool:
+    """Return True if the document needs LLM cleanup re-run."""
     if not entry.get("pasal_exists"):
         return False
     if not entry.get("llm_cleaned"):
@@ -150,6 +165,7 @@ def sync_doc_from_indexes(
     current_parser_version: str,
     current_llm_cleanup_version: str,
 ):
+    """Refresh one document's manifest entry from its on-disk index files."""
     entry = ensure_doc_entry(manifest, doc_id, registry_entry)
 
     docs_by_granularity = {}
@@ -237,6 +253,7 @@ def sync_manifest_from_indexes(
     current_llm_cleanup_version: str,
     doc_ids: list[str] | None = None,
 ):
+    """Refresh manifest entries for all (or selected) documents from their index files."""
     prune_orphan_manifest_entries(manifest, registry)
     target_doc_ids = doc_ids or sorted(doc_id for doc_id, entry in registry.items() if entry.get("has_pdf"))
     for doc_id in target_doc_ids:
@@ -250,16 +267,19 @@ def sync_manifest_from_indexes(
 
 
 def set_doc_error(manifest: dict, doc_id: str, message: str, registry_entry: dict | None = None):
+    """Record an error message on a document's manifest entry."""
     entry = ensure_doc_entry(manifest, doc_id, registry_entry)
     entry["last_error"] = message
 
 
 def clear_doc_error(manifest: dict, doc_id: str, registry_entry: dict | None = None):
+    """Clear the error message on a document's manifest entry."""
     entry = ensure_doc_entry(manifest, doc_id, registry_entry)
     entry["last_error"] = None
 
 
 def apply_verify_results(manifest: dict, granularity: str, results: list[dict], registry: dict | None = None):
+    """Write verification results into the manifest for the given granularity."""
     for result in results:
         doc_id = result["doc_id"]
         entry = ensure_doc_entry(manifest, doc_id, registry.get(doc_id) if registry else None)
@@ -272,6 +292,7 @@ def apply_verify_results(manifest: dict, granularity: str, results: list[dict], 
 
 
 def _summarize_status(manifest: dict, doc_ids: list[str] | None = None) -> tuple[dict, dict]:
+    """Compute aggregate counts and per-granularity verify tallies from the manifest."""
     docs = manifest.get("docs", {})
     selected = [
         docs[doc_id]
@@ -319,6 +340,7 @@ def _summarize_status(manifest: dict, doc_ids: list[str] | None = None) -> tuple
 
 
 def _refresh_verify_into_manifest(manifest: dict, doc_id: str | None = None):
+    """Re-run verification and update the manifest with fresh results."""
     from .verify import verify_index
 
     registry = load_registry()
@@ -330,6 +352,7 @@ def _refresh_verify_into_manifest(manifest: dict, doc_id: str | None = None):
 
 
 def main():
+    """CLI entry point for displaying and refreshing the indexing status manifest."""
     ap = argparse.ArgumentParser(description="Show indexing progress/status manifest")
     ap.add_argument("--doc-id", type=str, help="Show status for one document")
     ap.add_argument("--category", type=str, help="Show only selected categories, e.g. UU,PP,PMK")

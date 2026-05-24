@@ -1,13 +1,10 @@
-"""LLM-first parser: extract pasal-level structure from PDF text.
+"""LLM-first parser that extracts pasal-level structure from PDF text.
 
-Public entry: `parse_doc(doc_id, model=None, dry_run=False)`. The model
-is resolved per-doc from the category registry when None. Side effect on
-non-dry runs: writes the parsed doc to `data/index_pasal/<CAT>/<doc_id>.json`
-(creating a one-shot backup of any prior version under
-`data/index_pasal_pre_llm_parse/`).
-
-CLI access lives at `scripts/parser/llm_parse.py`. This module is
-library-only.
+Public entry point is `parse_doc(doc_id, model=None, dry_run=False)`.
+The model is resolved per-doc from the category registry when None.
+Non-dry runs write the parsed doc to `data/index_pasal/<CAT>/<doc_id>.json`,
+creating a one-shot backup of any prior version under
+`data/index_pasal_pre_llm_parse/`.
 """
 from __future__ import annotations
 
@@ -48,11 +45,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def call_llm(prompt: str, model: str, max_output_tokens: int = 65536) -> tuple[dict, dict]:
-    """Call the LLM for structured JSON parse output.
-
-    Returns (parsed_obj, usage). Retries (transient errors and JSON parse
-    failures) are handled inside vectorless.llm.call.
-    """
+    """Call the LLM for structured JSON parse output. Returns (parsed_obj, usage)."""
     t0 = time.time()
     parsed, base_usage = llm_call(
         prompt,
@@ -397,12 +390,6 @@ TITLE CONVENTIONS:
    code fences. No trailing explanation. One top-level key: "structure".
 """
 
-# Tree-normalization helpers (iter_nodes, collect_pasal_numbers,
-# _PASAL_TITLE_RE, normalize_pasal_titles_in_tree, assign_readable_node_ids,
-# build_navigation_paths) live in vectorless/indexing/tree.py. backfill_page_indices
-# is also there. Imported at the top of this module.
-
-
 # Patterns for splitting a parent's penjelasan text into per-child slices.
 # Tolerant to OCR quirks like "Hurufb" without space.
 _PENJ_AYAT_HEADER_RE = re.compile(r"(?:^|\n)\s*Ayat\s*\(?(\d+)\)?\s*\n?", re.IGNORECASE)
@@ -498,13 +485,7 @@ _INLINE_MARKER_RE = re.compile(
 
 
 def _find_hybrid_nodes(structure: list[dict]) -> list[str]:
-    """Return node_ids where text has inline ayat/huruf/angka markers AND
-    the node also has children — indicates the LLM partially pre-split
-    sub-structure, which breaks the deterministic re-split pass.
-
-    Requires >=2 marker hits to avoid flagging amendment Angka N nodes
-    whose text legitimately begins with "N. Ketentuan Pasal X diubah ...".
-    """
+    """Return node_ids where text has inline markers AND the node also has children."""
     hybrids: list[str] = []
     for n in iter_nodes(structure):
         if not n.get("nodes"):
@@ -710,17 +691,13 @@ _CONTAINER_TITLE_RE = re.compile(r"^(BAB|Bagian|Paragraf)\b", re.IGNORECASE)
 
 
 def _is_container(node: dict) -> bool:
+    """Return True if the node is a BAB, Bagian, or Paragraf container."""
     t = (node.get("title") or "").strip()
     return bool(_CONTAINER_TITLE_RE.match(t)) and not _PASAL_TITLE_RE.match(t)
 
 
 def _merge_chunk_structures(chunks: list[list[dict]]) -> list[dict]:
-    """Merge chunk outputs into one tree, deduping Pasals under their container path.
-
-    BAB > Bagian > Paragraf containers are matched across chunks by normalized
-    title (node_id is not stable across chunks when a BAB header falls outside
-    the chunk's page range).
-    """
+    """Merge chunk outputs into one tree, deduping Pasals under their container path."""
     if not chunks:
         return []
 
@@ -875,13 +852,8 @@ def _chunk_by_pasal(
 ) -> list[tuple[int, int]]:
     """Chunk into page ranges aligned on Pasal boundaries with overlap.
 
-    Boundaries land BETWEEN Pasals, never mid-Pasal. Each range is extended by
-    `overlap_pages` on each side so adjacent chunks share context — the LLM
-    sees prior-Pasal context at the chunk head (avoids misattributing page-top
-    spillover to the first heading), and the merger keeps the longest copy.
-
-    Returns [] when no Pasals are detected — caller should fall back to
-    `_chunk_pages`.
+    Returns [] when no Pasals are detected, in which case the caller
+    should fall back to _chunk_pages.
     """
     # Count heading OCCURRENCES, not unique pages: dense docs pack 3-5 pasals
     # per page, so page-counting would undercount.
@@ -954,15 +926,7 @@ def _load_inputs(doc_id: str) -> _Inputs:
 
 
 def _plan_chunking(inputs: _Inputs) -> _ChunkPlan:
-    """Decide single-shot vs multi-chunk parse based on input size.
-
-    Char count above MAX_WHOLE_DOC_INPUT_CHARS forces chunking to keep the
-    LLM output budget (~65K tokens) feasible. For non-amendment docs, a
-    high pasal count is also a chunking trigger because each pasal expands
-    into nested ayat/huruf/angka text downstream. Amendment docs emit only
-    1-2 Pasal Roman roots regardless of inner Pasal count, so the
-    pasal-count threshold doesn't apply.
-    """
+    """Decide single-shot vs multi-chunk parse based on input size and pasal count."""
     char_count = len(inputs.pdf_text_full)
     if inputs.meta["is_perubahan"]:
         use_chunked = char_count > MAX_WHOLE_DOC_INPUT_CHARS
@@ -983,13 +947,7 @@ def _plan_chunking(inputs: _Inputs) -> _ChunkPlan:
 
 
 def _run_llm_parse(inputs: _Inputs, plan: _ChunkPlan, model: str) -> _LLMResult:
-    """Invoke the LLM (single-shot or parallel chunks) and merge the output.
-
-    Returns the combined structure with aggregate usage and any per-chunk
-    errors. `error` is set only when no chunk produced usable output. A
-    partial chunk failure is tolerated (errors recorded, surviving chunks
-    merged).
-    """
+    """Invoke the LLM (single-shot or parallel chunks) and merge the output."""
     doc_id = inputs.meta["doc_id"]
     judul = inputs.meta["judul"]
     is_perubahan = inputs.meta["is_perubahan"]
@@ -1057,14 +1015,7 @@ def _finalize_structure(
     pdf_pasal_numbers: list[str],
     is_perubahan: bool,
 ) -> list[str]:
-    """Normalize the raw LLM tree in place. Returns diagnostic validation errors.
-
-    Title normalization runs first because navigation_path depends on the
-    canonical form: BM25 tokenization is sensitive to OCR drift between e.g.
-    'Pasal 15I' and 'Pasal l5I'. Validation is diagnostic only (the legacy
-    regex validator false-positives on intentional pasal gaps and container
-    nodes), but the errors are still surfaced for human review.
-    """
+    """Normalize the raw LLM tree in place. Returns diagnostic validation errors."""
     normalize_pasal_titles_in_tree(structure)
     assign_readable_node_ids(structure)
     build_navigation_paths(structure)
@@ -1076,13 +1027,7 @@ def _finalize_structure(
 def _persist(
     final_doc: dict, doc_id: str, jenis_folder: str, dry_run: bool
 ) -> tuple[Path, Path | None]:
-    """Write `final_doc` to its index path. Returns (output_path, backup_path).
-
-    On dry_run, a preview is written under tmp/ and backup_path is None.
-    On a real write, an existing index_path is copied to BACKUP_DIR before
-    overwrite (one-shot per doc, not incremental). Backup is skipped when
-    the doc has never been indexed before.
-    """
+    """Write final_doc to its index path. Returns (output_path, backup_path)."""
     if dry_run:
         preview = REPO_ROOT / "tmp" / f"llm_parse_preview_{doc_id}.json"
         preview.parent.mkdir(parents=True, exist_ok=True)
@@ -1109,17 +1054,7 @@ def _persist(
 
 
 def parse_doc(doc_id: str, *, model: str | None = None, dry_run: bool = False) -> dict:
-    """Parse one document and return its audit record.
-
-    Pipeline: load inputs (metadata + PDF) -> resolve parser model
-    -> plan chunking -> dispatch LLM call(s) -> finalize tree (titles,
-    ids, navigation, page indices) -> persist. Errors at any step return
-    early with audit["status"] == "error" and audit["error"] set.
-
-    The parser model is resolved from the document's category registry
-    entry when `model` is None (the normal path). Pass an explicit model
-    only for ad-hoc parser experiments.
-    """
+    """Parse one document end-to-end and return its audit record."""
     audit: dict = {
         "doc_id": doc_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -1184,18 +1119,13 @@ def parse_doc(doc_id: str, *, model: str | None = None, dry_run: bool = False) -
 
 
 def _accumulate_usage(dst: dict, src: dict) -> None:
+    """Add token and timing counters from src into dst."""
     for k in ("input_tokens", "output_tokens", "total_tokens", "calls", "elapsed_s"):
         dst[k] = (dst.get(k, 0) or 0) + (src.get(k, 0) or 0)
 
 
 def _append_audit(entry: dict) -> None:
-    """Append one audit record to AUDIT_LOG, preserving prior entries.
-
-    A corrupt log (invalid JSON, or a non-list root) is renamed with a
-    `.corrupt-<ts>` suffix and a fresh log starts. Silently resetting the
-    log to `[]` would lose history; this preserves the bad file for later
-    inspection while letting the current run continue.
-    """
+    """Append one audit record to AUDIT_LOG, quarantining corrupt log files."""
     AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
     existing: list = []
     if AUDIT_LOG.exists():
