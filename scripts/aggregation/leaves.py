@@ -1,10 +1,7 @@
 """Count leaf nodes in the indexed corpus per granularity.
 
-Walks data/index_pasal, data/index_ayat, and data/index_rincian, counts
-text-bearing leaves per document, and reports per-granularity totals
-plus per-category breakdown. Mirrors the leaf definition used by
-scripts/gt/select_gt_docs.py:count_leaves so numbers stay comparable
-across the GT pipeline and corpus reporting.
+Walks each index directory, counts text-bearing leaves per document,
+and reports per-granularity totals plus per-category breakdowns.
 
 Usage:
     python scripts/aggregation/leaves.py
@@ -27,12 +24,7 @@ DEFAULT_OUTPUT = Path("data/leaf_counts.json")
 
 
 def count_leaves(structure: list[dict]) -> int:
-    """Count text-bearing leaf nodes in a parsed index structure.
-
-    Identical to scripts/gt/select_gt_docs.py:count_leaves so the totals
-    here line up with the leaf counts the GT selection pipeline uses
-    for stratification.
-    """
+    """Count text-bearing leaf nodes in a parsed index structure."""
     total = 0
     for node in structure:
         if node.get("nodes"):

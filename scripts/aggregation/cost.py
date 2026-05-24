@@ -1,19 +1,8 @@
 """Aggregate per-doc indexing cost logs into per-stage summaries.
 
-Reads data/indexing_logs/cost_pasal.json, cost_ayat.json, and
-cost_rincian.json (written incrementally by vectorless.indexing.build),
-and tallies time, token, and call totals per stage and per category.
-
-Stages reported.
-  - parse        OpenAI gpt-5 LLM parser (pasal log only)
-  - ocr_clean    Vertex Gemini flash-lite OCR repair (pasal log only)
-  - resplit      Deterministic splitter, no LLM (ayat and rincian logs)
-  - summary      Vertex Gemini flash-lite per-node annotator (all three)
-
-Output schema mirrors the input granularities. Each granularity holds
-per-stage aggregates plus per-category breakdowns and a per-doc mean.
-A top-level "totals" block sums across all three granularities so the
-overall corpus indexing cost can be quoted directly.
+Reads cost log files written by vectorless.indexing.build and tallies
+time, token, and call totals per stage and per category. A top-level
+"totals" block sums across all three granularities.
 
 Usage:
     python scripts/aggregation/cost.py
@@ -34,9 +23,6 @@ GRANULARITIES = ("pasal", "ayat", "rincian")
 DEFAULT_LOG_DIR = Path("data/indexing_logs")
 DEFAULT_OUTPUT = Path("data/indexing_cost_summary.json")
 
-# Field-to-stage mapping. Each tuple is (stage, field-prefix) so the
-# aggregator can extract uniform (time_s, tokens, calls) triples from
-# the heterogeneous per-doc records.
 _PASAL_STAGES = (
     ("parse",     {"time": "llm_time_s",        "tokens": "llm_total_tokens",  "calls": "llm_calls"}),
     ("ocr_clean", {"time": "ocr_clean_time_s",  "tokens": "ocr_clean_tokens",  "calls": "ocr_clean_calls"}),
@@ -116,13 +102,10 @@ def aggregate_log(log_path: Path, granularity: str) -> dict:
 
 
 def combined_totals(report: dict) -> dict:
-    """Sum stages across granularities to produce a corpus-wide rollup.
+    """Sum stages across granularities into a corpus-wide rollup.
 
-    Deduplicates the `resplit` stage. vectorless.indexing.build measures
-    one combined re-split timer that produces both ayat and rincian leaves
-    in one pass, then writes that same value to both granularity cost logs.
-    Summing them would double-count, so resplit is taken from the first
-    granularity that reports it.
+    The resplit stage is deduplicated because the same timer value is
+    written to both ayat and rincian cost logs.
     """
     grand: dict = {}
     seen_dedup: set = set()

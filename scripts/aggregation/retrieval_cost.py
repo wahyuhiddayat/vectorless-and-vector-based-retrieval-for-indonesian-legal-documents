@@ -1,18 +1,8 @@
-"""Aggregate per-query retrieval cost from eval_runs JSONL records.
+"""Aggregate per-query retrieval cost from eval run JSONL records.
 
-Walks data/eval_runs/<label>/records/<system>__<granularity>.jsonl
-(produced by scripts/eval/{vectorless,vector}.py) and rolls up LLM
-calls, tokens, and wall-clock time per (run, system, granularity).
-Per-step breakdowns are derived from each record's `step_metrics`
-field, and per-query-style slices are derived from `query_style`.
-
-The canonical retrieval-cost source is `data/eval_runs/<label>/records/`,
-not `data/retrieval_logs/`. The latter holds ad-hoc per-call dumps
-from interactive runs and is sparse. This script reads only the
-former.
-
-Errored queries (`worker_ok=false`) are counted but excluded from
-cost rollups, since their token and elapsed counts are unreliable.
+Reads per-combo JSONL files from data/eval_runs and rolls up LLM
+calls, tokens, and wall-clock time per run, system, and granularity.
+Errored queries are counted but excluded from cost rollups.
 
 Usage:
     python scripts/aggregation/retrieval_cost.py
