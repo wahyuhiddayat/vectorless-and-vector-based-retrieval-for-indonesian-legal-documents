@@ -184,8 +184,11 @@ _RETRYABLE_TOKENS = (
 )
 
 
-def _call_openai(prompt: str, model: str, max_tokens: int) -> tuple[str, int, int]:
+def _call_openai(prompt: str, model: str, max_tokens: int,
+                 system: str | None = None) -> tuple[str, int, int]:
     """One OpenAI Chat Completions call. Returns (text, input_tokens, output_tokens)."""
+    if system:
+        prompt = system + "\n\n" + prompt
     cli = _openai_client()
     kwargs: dict = {
         "model": model,
@@ -205,12 +208,15 @@ def _call_openai(prompt: str, model: str, max_tokens: int) -> tuple[str, int, in
     return text, in_tok, out_tok
 
 
-def _call_anthropic(prompt: str, model: str, max_tokens: int) -> tuple[str, int, int]:
+def _call_anthropic(prompt: str, model: str, max_tokens: int,
+                    system: str | None = None) -> tuple[str, int, int]:
     """One Anthropic Messages call. Returns (text, input_tokens, output_tokens).
 
     Anthropic has no native JSON-mode; rely on prompt to request JSON and
     on the outer retry loop to recover from parse failures.
     """
+    if system:
+        prompt = system + "\n\n" + prompt
     cli = _anthropic_client()
     resp = cli.messages.create(
         model=model,
@@ -224,7 +230,8 @@ def _call_anthropic(prompt: str, model: str, max_tokens: int) -> tuple[str, int,
     return text, in_tok, out_tok
 
 
-def _call_deepseek(prompt: str, model: str, max_tokens: int) -> tuple[str, int, int]:
+def _call_deepseek(prompt: str, model: str, max_tokens: int,
+                   system: str | None = None) -> tuple[str, int, int]:
     """One DeepSeek Chat Completions call. Returns (text, input_tokens, output_tokens).
 
     Uses OpenAI-compatible endpoint at api.deepseek.com. JSON output mode is
@@ -232,11 +239,20 @@ def _call_deepseek(prompt: str, model: str, max_tokens: int) -> tuple[str, int, 
     mirror gpt-5's `reasoning_effort="minimal"` for structured-extraction
     callers (parser, judge): empirically the V4 default thinking=on bloats
     output ~5x without quality lift on prompt-driven JSON tasks.
+
+    When `system` is provided, it becomes a separate system message placed
+    before the user message. DeepSeek auto-caches by prefix matching, so
+    consecutive calls sharing the same system content get prefix-cache hits
+    at $0.0028/1M instead of $0.14/1M.
     """
     cli = _deepseek_client()
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
     kwargs: dict = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "response_format": {"type": "json_object"},
         "max_tokens": max_tokens,
         "temperature": 0.0,
@@ -249,8 +265,11 @@ def _call_deepseek(prompt: str, model: str, max_tokens: int) -> tuple[str, int, 
     return text, in_tok, out_tok
 
 
-def _call_vertex(prompt: str, model: str, max_tokens: int) -> tuple[str, int, int]:
+def _call_vertex(prompt: str, model: str, max_tokens: int,
+                 system: str | None = None) -> tuple[str, int, int]:
     """One Vertex AI Gemini call. Returns (text, input_tokens, output_tokens)."""
+    if system:
+        prompt = system + "\n\n" + prompt
     cli = _vertex_client()
     from google.genai import types as gtypes
     cfg_kwargs: dict = {
@@ -273,28 +292,33 @@ def _call_vertex(prompt: str, model: str, max_tokens: int) -> tuple[str, int, in
     return text, in_tok, out_tok
 
 
-def _call_backend(prompt: str, model: str, max_tokens: int) -> tuple[str, int, int]:
+def _call_backend(prompt: str, model: str, max_tokens: int,
+                  system: str | None = None) -> tuple[str, int, int]:
     """Dispatch to the right backend. Returns (text, input_tokens, output_tokens)."""
     backend = _backend(model)
     if backend == "openai":
-        return _call_openai(prompt, model, max_tokens)
+        return _call_openai(prompt, model, max_tokens, system=system)
     if backend == "anthropic":
-        return _call_anthropic(prompt, model, max_tokens)
+        return _call_anthropic(prompt, model, max_tokens, system=system)
     if backend == "vertex":
-        return _call_vertex(prompt, model, max_tokens)
+        return _call_vertex(prompt, model, max_tokens, system=system)
     if backend == "deepseek":
-        return _call_deepseek(prompt, model, max_tokens)
+        return _call_deepseek(prompt, model, max_tokens, system=system)
     raise ValueError(f"Unknown backend: {backend}")
 
 
 def call(prompt: str, *, model: str = MODEL, max_retries: int = 8,
          max_completion_tokens: int = 16384,
-         return_usage: bool = False) -> dict | tuple[dict, dict]:
+         return_usage: bool = False,
+         system: str | None = None) -> dict | tuple[dict, dict]:
     """Send prompt to the configured LLM, return parsed JSON.
 
-    Routes by model prefix to OpenAI, Anthropic, or Vertex Gemini. Retries
-    transient errors and non-JSON responses up to max_retries times with
-    exponential backoff.
+    Routes by model prefix to OpenAI, Anthropic, Vertex Gemini, or DeepSeek.
+    Retries transient errors and non-JSON responses up to max_retries times
+    with exponential backoff.
+
+    When `system` is provided, DeepSeek places it as a separate system message
+    for prefix-cache benefits. Other backends prepend it to the user prompt.
 
     With return_usage=True, returns (json_dict, usage_dict) for caller-local
     accounting.
@@ -302,7 +326,8 @@ def call(prompt: str, *, model: str = MODEL, max_retries: int = 8,
     last_exc: Exception | None = None
     for attempt in range(max_retries):
         try:
-            text, in_tok, out_tok = _call_backend(prompt, model, max_completion_tokens)
+            text, in_tok, out_tok = _call_backend(prompt, model, max_completion_tokens,
+                                                  system=system)
             _track(in_tok, out_tok)
 
             # Strip markdown fences in case the model wraps despite JSON mode.

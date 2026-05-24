@@ -64,30 +64,31 @@ def doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K,
     slim_catalog = catalog_for_llm_prompt(catalog)
     docs_text = json.dumps(slim_catalog, ensure_ascii=False, indent=2)
 
-    prompt = f"""\
+    system = f"""\
 Kamu diberi daftar Undang-Undang Indonesia beserta metadata dan ringkasan isi-nya.
-Pilih UU yang paling mungkin mengandung jawaban untuk pertanyaan hukum berikut.
-
-Pertanyaan: {query}
+Pilih UU yang paling mungkin mengandung jawaban untuk pertanyaan hukum yang diberikan user.
 
 Daftar UU:
 {docs_text}
-
-Balas dalam format JSON:
-{{
-  "thinking": "<penalaran singkat mengapa UU tersebut kemungkinan relevan>",
-  "doc_ids": ["doc_id_1", "doc_id_2", "doc_id_3"]
-}}
 
 Aturan:
 - Pilih 1 sampai {top_k} UU yang paling mungkin mengandung jawaban (recall-oriented).
 - Lebih baik over-include sedikit daripada miss UU yang relevan.
 - Pertimbangkan judul, bidang, subjek, materi_pokok, dan doc_summary_text (kalau tersedia).
 - Hanya kembalikan doc_ids kosong [] jika benar-benar tidak ada satupun yang dekat dengan topik pertanyaan.
-- Kembalikan HANYA JSON, tanpa teks lain.
+- Kembalikan HANYA JSON, tanpa teks lain."""
+
+    prompt = f"""\
+Pertanyaan: {query}
+
+Balas dalam format JSON:
+{{
+  "thinking": "<penalaran singkat mengapa UU tersebut kemungkinan relevan>",
+  "doc_ids": ["doc_id_1", "doc_id_2", "doc_id_3"]
+}}
 """
 
-    llm_result = llm_call(prompt)
+    llm_result = llm_call(prompt, system=system)
 
     valid_ids = {d["doc_id"] for d in catalog}
     llm_doc_ids = [doc_id for doc_id in llm_result.get("doc_ids", []) if doc_id in valid_ids]
@@ -344,18 +345,20 @@ def _anti_loop_hints(scratchpad: list[dict], actions_used: int, reads_used: int,
     return hints
 
 
-def _build_prompt(query: str, scratchpad: list[dict],
-                  actions_left: int, reads_left: int,
-                  picked_docs: dict[str, dict],
-                  multidoc_outline: str,
-                  steering_hints: list[str] | None = None) -> str:
+def _build_prompt_parts(query: str, scratchpad: list[dict],
+                        actions_left: int, reads_left: int,
+                        picked_docs: dict[str, dict],
+                        multidoc_outline: str,
+                        steering_hints: list[str] | None = None) -> tuple[str, str]:
     """Build the next-step prompt for the agent in multi-doc mode.
 
-    The agent sees K=3 picked docs upfront (full hierarchical outlines)
-    and must include `doc_id` in every tool args. Submit accepts
-    `doc_id/node_id` ref strings so the final ranking can mix nodes from
-    any of the picked docs. Steering hints, if provided, are surfaced in
-    their own section to nudge the agent out of stalled patterns.
+    Returns (system, prompt). The system message contains the static context
+    that is identical across all agent steps for one query (instructions,
+    query, doc outlines, tools, workflow). DeepSeek auto-caches the system
+    prefix across consecutive calls, so steps 2-N get prefix-cache hits.
+
+    The prompt (user message) contains only the per-step dynamic content
+    (budget, steering hints, scratchpad).
     """
     doc_headers = "\n".join(
         f"  - {did} -- {doc.get('judul', '')}"
@@ -365,7 +368,7 @@ def _build_prompt(query: str, scratchpad: list[dict],
     if steering_hints:
         hints_text = "\n".join(f"  - {h}" for h in steering_hints)
         hints_block = f"── PERINGATAN ──\n{hints_text}\n\n"
-    return (
+    system = (
         "Kamu adalah agen retrieval dokumen hukum.\n"
         "Tugas: temukan node paling relevan (pasal/ayat/rincian) untuk menjawab pertanyaan.\n"
         "Kamu diberi beberapa UU kandidat, dan harus eksplor satu atau beberapa untuk\n"
@@ -392,20 +395,23 @@ def _build_prompt(query: str, scratchpad: list[dict],
         "Submit beberapa kandidat (sampai 10) jika ada lebih dari satu node yang relevan\n"
         "atau jika kamu tidak yakin mana yang paling tepat. Urutkan paling yakin dulu.\n"
         "Tetap selektif, jangan submit node yang jelas tidak relevan hanya untuk mengisi slot.\n\n"
+        "── FORMAT ──\n"
+        "{\n"
+        '  "thinking": "...",\n'
+        '  "action": "expand" | "read" | "submit",\n'
+        '  "args": { ... }\n'
+        "}\n"
+    )
+    prompt = (
         f"── SISA ANGGARAN ──\n"
         f"Action: {actions_left} | Read: {reads_left}\n"
         "Gunakan read() secara selektif — hanya untuk verifikasi.\n\n"
         f"{hints_block}"
         "── RIWAYAT TINDAKAN ──\n"
         f"{_render_scratchpad(scratchpad)}\n\n"
-        "── FORMAT ──\n"
-        "{\n"
-        '  "thinking": "...",\n'
-        '  "action": "expand" | "read" | "submit",\n'
-        '  "args": { ... }\n'
-        "}\n\n"
         "Apa langkah selanjutnya?\n"
     )
+    return system, prompt
 
 
 def _siblings_hint_multidoc(picked_docs: dict[str, dict], doc_id: str,
@@ -509,7 +515,7 @@ def retrieve(query: str,
         steering_hints = _anti_loop_hints(
             scratchpad, actions_used, reads_used, max_actions, max_reads,
         )
-        prompt = _build_prompt(
+        system, prompt = _build_prompt_parts(
             query, scratchpad,
             actions_left=max_actions - actions_used,
             reads_left=max_reads - reads_used,
@@ -519,7 +525,7 @@ def retrieve(query: str,
         )
 
         try:
-            response = llm_call(prompt)
+            response = llm_call(prompt, system=system)
             parse_failures = 0
         except json.JSONDecodeError:
             parse_failures += 1
