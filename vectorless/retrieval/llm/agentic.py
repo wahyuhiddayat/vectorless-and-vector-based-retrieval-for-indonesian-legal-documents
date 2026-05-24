@@ -49,17 +49,16 @@ def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_
 
 def doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K,
                verbose: bool = True) -> dict:
-    """Pick up to `top_k` relevant documents via recall-oriented LLM plus BM25 fallback.
+    """Pick up to `top_k` relevant documents via pure LLM selection.
 
-    The LLM is asked to lean over-inclusive (1-3 docs) rather than refuse,
-    because the previous strict prompt caused 2/7 queries to hard-fail in
-    the 2026-05-13 pilot. BM25 picks are always merged in as a safety net,
-    so single-doc cascade failures (the tree-paradigm Achilles heel) are
-    softened by giving the agent loop multiple doc candidates.
+    The LLM is asked to lean over-inclusive (1-3 docs) rather than refuse.
+    No BM25 fallback is used, keeping the method faithful to the Vectify
+    PageIndex architecture (pure LLM reasoning at every stage). The catalog
+    is placed in a system message so DeepSeek can prefix-cache the ~46K
+    token catalog across all 357 queries at each granularity.
 
     Returns:
-        Dict with `doc_ids` (merged, capped at top_k), `llm_doc_ids`,
-        `bm25_doc_ids`, `thinking`, and `merge_source` per doc for telemetry.
+        Dict with `doc_ids` (capped at top_k), `llm_doc_ids`, and `thinking`.
     """
     slim_catalog = catalog_for_llm_prompt(catalog)
     docs_text = json.dumps(slim_catalog, ensure_ascii=False, indent=2)
@@ -92,39 +91,15 @@ Balas dalam format JSON:
 
     valid_ids = {d["doc_id"] for d in catalog}
     llm_doc_ids = [doc_id for doc_id in llm_result.get("doc_ids", []) if doc_id in valid_ids]
-    bm25_doc_ids = _bm25_doc_search(query, catalog, top_k=top_k)
-
-    # Interleave LLM and BM25 picks so neither signal dominates. LLM gets
-    # priority at each position (semantic precedence), but BM25 always has
-    # a slot if both lists have entries at that rank. This matters when
-    # LLM picks semantically-related-but-keyword-mismatched docs while BM25
-    # picks the lexically-matching doc that actually contains the answer.
-    merged: list[str] = []
-    merge_source: dict[str, str] = {}
-    for i in range(max(len(llm_doc_ids), len(bm25_doc_ids))):
-        for src_label, src_list in (("llm", llm_doc_ids), ("bm25", bm25_doc_ids)):
-            if i < len(src_list):
-                doc_id = src_list[i]
-                if doc_id not in merge_source:
-                    merged.append(doc_id)
-                    merge_source[doc_id] = src_label
-                    if len(merged) >= top_k:
-                        break
-        if len(merged) >= top_k:
-            break
 
     result = {
-        "doc_ids": merged,
+        "doc_ids": llm_doc_ids[:top_k],
         "llm_doc_ids": llm_doc_ids,
-        "bm25_doc_ids": bm25_doc_ids,
-        "merge_source": merge_source,
         "thinking": llm_result.get("thinking", ""),
     }
 
     if verbose:
-        print(f"\n[Doc Search] LLM picks: {llm_doc_ids}")
-        print(f"             BM25 picks: {bm25_doc_ids}")
-        print(f"             Merged: {merged}")
+        print(f"\n[Doc Search] LLM picks: {llm_doc_ids[:top_k]}")
         if llm_result.get("thinking"):
             print(f"  Reasoning: {llm_result['thinking'][:200]}")
 
@@ -409,7 +384,7 @@ def _build_prompt_parts(query: str, scratchpad: list[dict],
         f"{hints_block}"
         "── RIWAYAT TINDAKAN ──\n"
         f"{_render_scratchpad(scratchpad)}\n\n"
-        "Apa langkah selanjutnya?\n"
+        "Apa langkah selanjutnya? Kembalikan HANYA JSON.\n"
     )
     return system, prompt
 
