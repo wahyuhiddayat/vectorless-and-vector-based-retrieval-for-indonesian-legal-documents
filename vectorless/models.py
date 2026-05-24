@@ -27,4 +27,4 @@ import os
 SUMMARY_MODEL = "gemini-2.5-flash-lite"
 OCR_CLEAN_MODEL = "gemini-2.5-flash-lite"
 JUDGE_MODEL = "gemini-2.5-pro"
-RETRIEVAL_MODEL = os.environ.get("RETRIEVAL_MODEL_OVERRIDE", "gemini-2.5-flash-lite")
+RETRIEVAL_MODEL = os.environ.get("RETRIEVAL_MODEL_OVERRIDE", "deepseek-v4-flash")

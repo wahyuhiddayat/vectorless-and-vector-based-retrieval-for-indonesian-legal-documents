@@ -270,6 +270,14 @@ def _execute_one_combo(
     new_records: list[dict] = []
 
     total_to_execute = sum(1 for qid, _ in selected_queries if qid not in completed)
+    # Adapt progress_every so resumes with small populations still emit ticks.
+    # Full runs (357 queries) keep the default PROGRESS_EVERY=25. A 22-query
+    # resume gets a tick every 5 queries, a 12-query resume every 3, and so on.
+    # Worst case the user still sees ~4 ticks across the combo plus the final.
+    effective_progress_every = (
+        max(1, min(progress_every, total_to_execute // 4 or 1))
+        if total_to_execute > 0 else progress_every
+    )
     executed = 0
     prefix = f"{system} x {granularity:<8}  " if verbose_prefix else ""
 
@@ -299,7 +307,7 @@ def _execute_one_combo(
             if record.get("error"):
                 cat = record.get("error_category", "other") or "other"
                 error_categories[cat] = error_categories.get(cat, 0) + 1
-            if (executed % progress_every == 0) or (executed == total_to_execute):
+            if (executed % effective_progress_every == 0) or (executed == total_to_execute):
                 n = len(new_records)
                 running_hit1 = sum(r.get("hit@1", 0.0) for r in new_records) / n
                 running_r10 = sum(r.get("recall@10", 0.0) for r in new_records) / n

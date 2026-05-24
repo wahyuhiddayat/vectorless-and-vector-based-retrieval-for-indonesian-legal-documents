@@ -274,13 +274,15 @@ def completed_qids_for_combo(records_dir: Path, system: str, granularity: str) -
     """Set of query_ids already recorded for this (system, granularity).
 
     Validates each record on read. Truncated rows or rows missing a required
-    metric are not counted as completed and will be re-run on resume.
+    metric are not counted as completed and will be re-run on resume. Records
+    where the worker failed (worker_ok=false) are also excluded so transient
+    errors get retried instead of being silently treated as zero-score completions.
     """
     path = records_dir / combo_filename(system, granularity)
     return {
         r["query_id"]
         for r in read_records_file(path, validate=True)
-        if r.get("query_id")
+        if r.get("query_id") and r.get("worker_ok", True)
     }
 
 
