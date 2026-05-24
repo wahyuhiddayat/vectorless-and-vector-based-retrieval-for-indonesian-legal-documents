@@ -1,18 +1,11 @@
-"""
-Pure vector (dense) retrieval for Indonesian legal documents.
+"""Dense vector retrieval for Indonesian legal documents.
 
-Two-stage when reranker is configured. Embed query, Qdrant cosine to fetch
-top-N=RERANKER_TOP_N (50) candidates, then optional reranker reorders to top-k.
-When reranker is "none", returns Qdrant top-k directly. Retrieval-only pipeline,
-no answer generation.
-
-Configuration via env vars (see common.py):
-    VECTOR_EMBEDDING_MODEL, VECTOR_COLLECTION, QDRANT_PATH / QDRANT_URL,
-    VECTOR_GRANULARITY, VECTOR_RERANKER
+Embeds the query, retrieves candidates from Qdrant by cosine
+similarity, and optionally reranks with a cross-encoder model.
+Configuration via environment variables (see common.py).
 
 Usage:
     python -m vector.retrieve_vector "Apa syarat penyadapan?"
-    python -m vector.retrieve_vector "Apa syarat penyadapan?" --top_k 10
     python -m vector.retrieve_vector "Apa syarat penyadapan?" --reranker bge-reranker-v2-m3
 """
 
@@ -29,9 +22,14 @@ def vector_search(query: str, top_k: int, verbose: bool = True,
                   query_vec: list[float] | None = None) -> dict:
     """Embed the query and return the top Qdrant matches.
 
-    When `query_vec` is provided, skip embedding and reuse the pre-computed
-    vector. The eval worker uses this to batch-encode all queries for a combo
-    in one forward pass.
+    Args:
+        query: Legal question in Indonesian.
+        top_k: Number of results to return.
+        verbose: Print results to stdout.
+        query_vec: Pre-computed query embedding. Skips encoding when provided.
+
+    Returns:
+        Dict with a rankings list of scored candidate dicts.
     """
     if query_vec is None:
         query_vec = embed_query(query)
@@ -68,10 +66,16 @@ def vector_search(query: str, top_k: int, verbose: bool = True,
 
 def retrieve(query: str, top_k: int = 10, verbose: bool = True,
              query_vec: list[float] | None = None) -> dict:
-    """Run dense retrieval with optional reranker. Returns retrieved chunks only.
+    """Run the full dense retrieval pipeline with optional reranking.
 
-    `query_vec` lets callers feed a pre-computed embedding to skip the embed
-    stage. Used by the eval worker for batch-encoded queries.
+    Args:
+        query: Legal question in Indonesian.
+        top_k: Final number of results to return.
+        verbose: Print progress to stdout.
+        query_vec: Pre-computed query embedding. Skips encoding when provided.
+
+    Returns:
+        Dict with query, strategy, sources, and metrics.
     """
     t_start = time.time()
     reranker = _common.RERANKER
@@ -153,6 +157,7 @@ def retrieve(query: str, top_k: int = 10, verbose: bool = True,
 
 
 def main():
+    """CLI entry point for vector retrieval."""
     ap = argparse.ArgumentParser(description="Vector (dense) retrieval for Indonesian legal docs")
     ap.add_argument("query", help="Legal question in Indonesian")
     ap.add_argument("--top_k", type=int, default=10, help="Final top-k (default: 10)")

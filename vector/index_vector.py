@@ -1,25 +1,12 @@
-"""
-Vector indexing pipeline for Indonesian legal documents.
+"""Vector indexing pipeline for Indonesian legal documents.
 
-Reads the same index JSON files used by vectorless-rag, collects all leaf nodes,
-embeds each chunk using the chosen embedding model, and stores in Qdrant.
-
-Supported embedding models (all local via SentenceTransformer).
-    bge-m3                          (1024d, BAAI/bge-m3, broad multilingual, 8K ctx)
-    multilingual-e5-large-instruct  (1024d, intfloat/..., instruction-tuned, 512 ctx)
-    all-nusabert-large-v4           (1024d, LazarusNLP/..., Indonesian supervised, 512 ctx)
-
-Qdrant storage:
-    --qdrant-path ./qdrant_local    local file-based mode (no server needed)
-    (omit)                          server mode via QDRANT_URL env var
-
-Collection name is auto-derived as  law-{granularity}-{model_short}
-unless --collection is supplied explicitly.
+Reads index JSON files, collects all leaf nodes, embeds them with
+SentenceTransformer, and stores the vectors in Qdrant. Collection name
+is auto-derived as law-{granularity}-{model_short} unless overridden.
 
 Usage:
     python -m vector.index_vector --source data/index_pasal --qdrant-path ./qdrant_local
     python -m vector.index_vector --source data/index_pasal --model multilingual-e5-large-instruct --qdrant-path ./qdrant_local
-    python -m vector.index_vector --source data/index_ayat  --model all-nusabert-large-v4 --qdrant-path ./qdrant_local
 """
 
 import argparse
@@ -206,7 +193,7 @@ def build_index(
             print(f"  Uploaded {min(i + UPSERT_BATCH, len(points))}/{len(points)} points")
 
     info = qdrant.get_collection(collection_name)
-    print(f"\nDone!")
+    print(f"\nIndexing complete.")
     print(f"  Collection: {collection_name}")
     print(f"  Points:     {info.points_count}")
     print(f"  Vectors:    {embedding_dim}d, distance=Cosine")

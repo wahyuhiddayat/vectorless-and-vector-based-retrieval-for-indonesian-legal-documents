@@ -1,17 +1,4 @@
-﻿"""
-Shared utilities for vector RAG retrieval pipelines.
-
-Contains: embedding loader, query embedding, log persistence.
-Used by retrieve_vector.py.
-
-All key settings are configurable via environment variables:
-    VECTOR_EMBEDDING_MODEL  e.g. bge-m3 (default)
-    VECTOR_COLLECTION       e.g. law-pasal-bgem3 (default)
-    QDRANT_URL              e.g. http://localhost:6333 (default)
-    QDRANT_PATH             e.g. ./qdrant_local  (local mode, takes priority over URL)
-    VECTOR_GRANULARITY      e.g. pasal (default), stored in result dict only
-    VECTOR_RERANKER         e.g. none (default), bge-reranker-v2-m3, qwen3-reranker-0.6b
-"""
+"""Shared utilities for vector RAG retrieval pipelines."""
 
 import json
 import os
@@ -30,26 +17,15 @@ GRANULARITY = os.environ.get("VECTOR_GRANULARITY", "pasal")
 RERANKER = os.environ.get("VECTOR_RERANKER", "none")
 LOG_DIR = Path("data/retrieval_logs")
 
-# First-stage candidate count fed to the reranker. Final top-k=10 returned to caller.
-# 50 chosen per Notes/06-decisions/vector-reranker-axis.md, balances recall ceiling
-# with reranker latency budget. See ADR for rationale and source citations.
-RERANKER_TOP_N = 50
+RERANKER_TOP_N = 50  # first-stage candidates fed to the reranker
 
-
-# RQ2 axis. Indonesian specialization gradient (breadth vs depth of training data).
-# All three are XLM-R or BERT-family encoders, sentence-transformers compatible,
-# Qdrant cosine, dense-only. See Notes/06-decisions/embedding-model-axis.md.
 _EMBEDDING_MODEL_MAP: dict[str, dict] = {
     "bge-m3": {
-        # Tier 1. Broad multilingual contrastive. XLM-R-large, MIT, native 8K ctx.
-        # Dense-only in RQ2. Sparse and ColBERT capabilities intentionally unused.
         "model_id": "BAAI/bge-m3",
         "dim": 1024,
         "backend": "sentence_transformers",
     },
     "multilingual-e5-large-instruct": {
-        # Tier 2. Multilingual plus instruction-tuned. XLM-R-large with GPT-4
-        # synthetic data, MIT, 512 ctx.
         "model_id": "intfloat/multilingual-e5-large-instruct",
         "dim": 1024,
         "backend": "sentence_transformers",
@@ -59,41 +35,26 @@ _EMBEDDING_MODEL_MAP: dict[str, dict] = {
         ),
     },
     "all-nusabert-large-v4": {
-        # Tier 3. Indonesian and Nusantara supervised. NusaBERT-large, Apache-2.0, 512 ctx.
         "model_id": "LazarusNLP/all-nusabert-large-v4",
         "dim": 1024,
         "backend": "sentence_transformers",
     },
 }
 
-
-# RQ2 reranker IV. Scoring-paradigm tier (no-rerank, encoder cross-attention, LLM pointwise).
-# See Notes/06-decisions/vector-reranker-axis.md for axis justification and model selection.
 _RERANKER_REGISTRY: dict[str, dict] = {
     "none": {
-        # R0. No reranker. First-stage Qdrant top-k=10 returned directly.
         "model_id": None,
         "backend": "none",
     },
     "bge-reranker-v2-m3": {
-        # R1. Encoder cross-encoder. XLM-R-large seq-cls, Apache-2.0, 8K ctx.
-        # Indonesian seen via MIRACL-id training mixture.
         "model_id": "BAAI/bge-reranker-v2-m3",
         "backend": "cross_encoder",
-        # Encoder, ~2 GB bf16 weights, padded to longest in batch. 128 fits on L4.
         "predict_batch_size": 128,
     },
     "qwen3-reranker-0.6b": {
-        # R2. Decoder LLM pointwise yes/no logit. Qwen3-0.6B, Apache-2.0, 32K ctx.
-        # Use the seq-cls conversion checkpoint for sentence-transformers CrossEncoder API.
+        # Smaller batch size because decoder KV-cache scales with batch * seqlen
         "model_id": "tomaarsen/Qwen3-Reranker-0.6B-seq-cls",
         "backend": "cross_encoder",
-        # Decoder LLM: KV-cache + activations scale with batch * seqlen. Cross-encoder
-        # pads to longest pair in the batch, so a single long passage in a batch of 128
-        # OOMs on L4 even though the model itself is small. 16 is safe and still ~3x
-        # faster than the sentence-transformers default of 32 once amortized over the
-        # whole combo (since the bottleneck on small batches is launch overhead, not
-        # compute).
         "predict_batch_size": 16,
     },
 }
@@ -103,14 +64,7 @@ _qdrant_client_cache = None
 
 
 def get_qdrant_client():
-    """Return a Qdrant client for local-path or server mode.
-
-    Cached at module level. qdrant-client local mode (`QdrantClient(path=...)`)
-    eagerly loads every collection found in the path into memory on instantiation,
-    a process that is single-threaded Python and runs into tens of minutes for the
-    full 9-collection RQ2 index. Without this cache, the eval worker constructs a
-    new client on every query and re-pays that cost 285 times per combo.
-    """
+    """Return a cached Qdrant client for local-path or server mode."""
     global _qdrant_client_cache
     if _qdrant_client_cache is not None:
         return _qdrant_client_cache
@@ -147,11 +101,7 @@ def embed_query(query: str) -> list[float]:
 
 
 def embed_queries(queries: list[str], batch_size: int = 64) -> list[list[float]]:
-    """Embed multiple queries in one model forward-pass batch.
-
-    Used by the eval worker to amortize per-query GPU dispatch over all queries
-    in a combo. Single-query callers should keep using `embed_query`.
-    """
+    """Embed multiple queries in one batched forward pass."""
     cfg = _EMBEDDING_MODEL_MAP.get(EMBEDDING_MODEL)
     if not cfg:
         raise ValueError(f"Unknown embedding model: {EMBEDDING_MODEL!r}")

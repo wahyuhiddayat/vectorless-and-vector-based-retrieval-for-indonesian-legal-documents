@@ -1,18 +1,8 @@
-﻿"""Reranker stage for vector RAG. Scores first-stage candidates and reorders.
+"""Reranker stage for vector RAG.
 
-Two backends supported via sentence-transformers `CrossEncoder` API. Both load
-HuggingFace models locally, no API call.
-
-Backends:
-    cross_encoder    Encoder cross-attention (e.g. BAAI/bge-reranker-v2-m3).
-                     Single forward pass per (query, doc) pair, output relevance logit.
-    cross_encoder    Decoder-LLM pointwise yes/no logit via tomaarsen seq-cls
-                     checkpoint conversion (e.g. tomaarsen/Qwen3-Reranker-0.6B-seq-cls).
-                     Same API surface, different scoring paradigm.
-
-The "none" reranker is a no-op pass-through, used for the R0 baseline.
-
-See Notes/06-decisions/vector-reranker-axis.md for model selection rationale.
+Scores first-stage candidates using a CrossEncoder model and reorders
+them by relevance. Supports encoder cross-attention and decoder LLM
+pointwise backends via the sentence-transformers CrossEncoder API.
 """
 
 from .common import _RERANKER_REGISTRY
@@ -22,27 +12,16 @@ _ce_model_cache: dict = {}
 
 
 def _get_cross_encoder(model_id: str):
-    """Load and cache a sentence-transformers CrossEncoder model.
+    """Load and cache a CrossEncoder model.
 
-    Loaded in bfloat16 weights when CUDA is available to halve VRAM.
-    Qwen3-Reranker-0.6B in fp32 OOMs on a 24 GB L4 because the embedding model
-    stays cached in VRAM from first-stage retrieval. bf16 fits comfortably with
-    no quality impact on transformer reranker inference, and L4 has native bf16
-    tensor-core support.
-
-    We pass torch_dtype via model_kwargs to AutoModel rather than calling
-    `model.to(dtype=bf16)` after construction. The post-hoc cast incorrectly
-    coerces the embedding layer's index pipeline as well, producing
-    "embedding(): argument 'indices' must be Tensor" at the first forward pass
-    on Qwen3-Reranker. model_kwargs only sets weight dtype, leaving input
-    handling intact.
+    Uses bfloat16 weights on CUDA to reduce VRAM usage. The dtype is
+    set via model_kwargs rather than post-hoc casting because the
+    latter breaks input handling on some decoder models.
     """
     if model_id not in _ce_model_cache:
         import torch
         from sentence_transformers import CrossEncoder
         if torch.cuda.is_available():
-            # Free VRAM fragmentation from the first-stage embedding model before
-            # the reranker arena claims its slab. Cheap insurance on smaller GPUs.
             torch.cuda.empty_cache()
             ce = CrossEncoder(
                 model_id,
@@ -56,19 +35,16 @@ def _get_cross_encoder(model_id: str):
 
 def rerank(query: str, candidates: list[dict], reranker_name: str,
            top_k: int = 10) -> list[dict]:
-    """Rerank candidates with the configured reranker, return top_k by descending score.
+    """Rerank candidates and return top_k by descending score.
 
     Args:
-        query: Indonesian legal question.
-        candidates: list of dicts each containing at least a `text` key. Order preserved
-            from first-stage retrieval. Other keys (doc_id, node_id, etc.) propagate.
-        reranker_name: registry key in `_RERANKER_REGISTRY`. "none" returns the first
-            top_k candidates unchanged.
-        top_k: number of candidates to return after reranking.
+        query: Legal question in Indonesian.
+        candidates: Candidate dicts with at least a "text" key.
+        reranker_name: Key in _RERANKER_REGISTRY. "none" passes through unchanged.
+        top_k: Number of candidates to return.
 
     Returns:
-        Reranked list of candidate dicts, length up to top_k. Each dict gets a new key
-        `rerank_score` (None for "none" backend).
+        Reranked list of candidate dicts with a rerank_score field added.
     """
     cfg = _RERANKER_REGISTRY.get(reranker_name)
     if cfg is None:
@@ -85,9 +61,6 @@ def rerank(query: str, candidates: list[dict], reranker_name: str,
     if cfg["backend"] == "cross_encoder":
         ce = _get_cross_encoder(cfg["model_id"])
         pairs = [(query, c["text"]) for c in candidates]
-        # Per-model batch size from the registry. Encoder rerankers tolerate large
-        # batches; decoder-LLM rerankers OOM on L4 above ~16 because activations
-        # scale with batch * pad-to-longest-seqlen.
         batch_size = cfg.get("predict_batch_size", 32)
         scores = ce.predict(pairs, batch_size=batch_size, show_progress_bar=False)
         scored = [(float(s), c) for s, c in zip(scores, candidates)]
