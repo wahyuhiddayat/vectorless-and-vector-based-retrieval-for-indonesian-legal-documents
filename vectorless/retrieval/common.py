@@ -16,30 +16,21 @@ DATA_INDEX = Path(os.environ.get("DATA_INDEX", "data/index_pasal"))
 LOG_DIR = Path("data/retrieval_logs")
 
 DOC_PICK_TOP_K = 3
-"""Standard top-K doc-pick for the multi-doc tree paradigm.
-
-Tree variants (bm25-tree, hybrid-tree, llm-agentic-doc) pick up to K=3 docs at
-stage 1, then navigate each hierarchy independently and merge. K=3 sits in the
-center of the IR multi-stage-retrieval default range (LangChain K=4, LlamaIndex
-K=5, RAG production K=3-10). K=1 was the original single-doc PageIndex setting
-which assumes single-doc input, not applicable to a 308-doc corpus.
-"""
+"""Number of documents selected at stage 1 for tree-based variants."""
 
 
 def tokenize(text: str) -> list[str]:
-    """Lowercase, regex split on [a-z0-9]+, drop length-1 tokens.
+    """Tokenize text into lowercase alphanumeric tokens.
 
-    No stopword removal, no stemming. Aligns with Faisal et al. (2024)
-    Table 5: both preprocessing techniques decrease BM25 EM on Indonesian
-    legal QA. BM25 IDF naturally downweights common terms.
+    No stopword removal or stemming. Single-letter tokens are dropped
+    but single digits are kept to preserve legal citations like
+    Pasal 3 or ayat 1.
 
-    Single letters (huruf list markers a/b/c) are dropped, single digits
-    are kept to preserve legal citations (Pasal 3, ayat 1). The 2026-05-20
-    ablation (run25 vs run23) confirmed the filter is neutral on retrieval
-    quality (max delta +0.006 H@1 at ayat, others within noise), since
-    BM25 IDF independently downweights high-DF letters. The filter is
-    retained for alignment with Faisal et al. (2024) preprocessing
-    methodology, not for a measurable retrieval lift.
+    Args:
+        text: Input text to tokenize.
+
+    Returns:
+        List of lowercase tokens.
     """
     return [t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > 1 or t.isdigit()]
 
@@ -53,10 +44,14 @@ def load_catalog() -> list[dict]:
 def doc_corpus_string(doc_meta: dict) -> str:
     """Build the BM25 doc-level corpus string for one catalog entry.
 
-    Prefers `doc_summary_text` (aggregated leaf summaries added by the
-    2026-05-13 catalog enrichment in `indexing/build.py`). Falls back to
-    the metadata fields when the summary field is absent so the helper
-    works both before and after the catalog rebuild.
+    Concatenates metadata fields and the aggregated doc_summary_text
+    when available.
+
+    Args:
+        doc_meta: One entry from catalog.json.
+
+    Returns:
+        Space-joined corpus string.
     """
     parts = [
         doc_meta.get("judul") or "",
@@ -71,14 +66,17 @@ def doc_corpus_string(doc_meta: dict) -> str:
 
 
 def catalog_for_llm_prompt(catalog: list[dict], summary_cap: int = 600) -> list[dict]:
-    """Return a slim catalog projection suitable for an LLM doc-pick prompt.
+    """Return a slim catalog projection for LLM doc-pick prompts.
 
-    The full `doc_summary_text` per doc can be several thousand characters,
-    so dumping the entire catalog inflates the prompt past a comfortable
-    budget. This helper keeps the metadata fields intact and truncates the
-    aggregated summary to `summary_cap` characters per doc, preserving the
-    leading signal (top-level pasals first) which is the most relevant for
-    doc-level topical match.
+    Keeps metadata fields intact and truncates doc_summary_text to
+    summary_cap characters per document.
+
+    Args:
+        catalog: Full catalog list from catalog.json.
+        summary_cap: Maximum characters for the summary field per doc.
+
+    Returns:
+        List of slim catalog entry dicts.
     """
     slim = []
     for doc in catalog:
@@ -104,6 +102,7 @@ def load_doc(doc_id: str) -> dict:
 
 
 def _collect_leaf_nodes(nodes: list[dict]) -> list[dict]:
+    """Recursively collect all leaf nodes that carry text."""
     leaves = []
     for node in nodes:
         if "nodes" in node and node["nodes"]:
@@ -168,23 +167,18 @@ def extract_nodes(doc: dict, node_ids: list[str]) -> list[dict]:
 
 def agentic_finalize(submitted_ids: list[str],
                      top_k: int) -> tuple[list[str], list[str]]:
-    """Finalize an agentic retrieval ranking from the agent's submitted ids.
+    """Deduplicate and truncate the agent's submitted ids to top_k.
 
-    Returns the agent's submitted ids deduplicated and truncated to top_k.
-    The output may be shorter than top_k when the agent chooses to submit
-    fewer candidates. This is intentional. The method is the agent, padding
-    the output with BM25 or visited nodes would conflate paradigms and the
-    7q audit showed both layers added negligible recall while inflating the
-    BM25 share of slots to roughly 70 percent.
+    The output may be shorter than top_k when the agent submits fewer
+    candidates.
 
     Args:
-        submitted_ids: ordered ids submitted by the agent, most relevant first.
-        top_k: maximum output length.
+        submitted_ids: Ordered ids from the agent, most relevant first.
+        top_k: Maximum output length.
 
     Returns:
-        Tuple `(final_ranking, sources_per_slot)`. `final_ranking` has length
-        min(top_k, unique submitted ids). `sources_per_slot` is a parallel
-        list labelling each slot as `agent_submit`.
+        Tuple of (final_ranking, source_labels). source_labels is a
+        parallel list labelling each slot as "agent_submit".
     """
     seen: set[str] = set()
     final: list[str] = []
@@ -200,24 +194,18 @@ def agentic_finalize(submitted_ids: list[str],
 
 
 def validate_llm_ranking(llm_ranking: list[str], candidates: list[dict]) -> list[str]:
-    """Validate and complete an LLM-generated ranking over candidate node_ids.
+    """Validate and complete an LLM-generated ranking.
 
-    Drops hallucinated and duplicate IDs, then appends any missing candidate IDs
-    in original first-stage order so the output length always matches the input
-    candidate count. Used by hybrid-flat and hybrid-tree LLM rerank stages.
+    Drops hallucinated and duplicate IDs, then appends missing candidate
+    IDs in their original order so the output covers all candidates.
 
     Args:
-        llm_ranking: list of node_ids returned by the LLM in descending relevance
-            order. May contain hallucinations, duplicates, or be shorter than
-            len(candidates).
-        candidates: list of candidate dicts (each with `node_id`), in first-stage
-            (BM25) order. Used for the valid-id set and the deterministic
-            tiebreak fallback.
+        llm_ranking: Node IDs from the LLM in descending relevance order.
+        candidates: Candidate dicts with node_id, in first-stage order.
 
     Returns:
-        List of node_ids of length len(candidates), unique, all present in the
-        candidate set, with the LLM ranking honoured first and any missing
-        candidates appended in first-stage order.
+        Complete list of node_ids covering all candidates, LLM ranking
+        first then missing candidates in original order.
     """
     valid_order = [c["node_id"] for c in candidates]
     valid_set = set(valid_order)
