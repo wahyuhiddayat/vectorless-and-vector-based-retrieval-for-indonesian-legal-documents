@@ -1,30 +1,11 @@
-"""LLM flat retrieval via chunked elimination tournament with shuffle mitigation.
+"""LLM flat retrieval via chunked elimination tournament.
 
-Position: TourRank-style tournament elimination (Chen et al., WWW 2025)
-extended to single-stage retrieval over a flat corpus without lexical or
-dense pre-filter. Listwise per-chunk ranking follows RankGPT (Sun et al.,
-EMNLP 2023). Inter-round shuffle and final-round permutation
-self-consistency are adopted from Tang et al. NAACL 2024 to mitigate
-positional bias and chunk-assignment lottery.
-
-Algorithm.
-  1. Round r: shuffle the candidate pool deterministically per query, split
-     into chunks of `LISTWISE_WINDOW`. LLM ranks each chunk listwise. The
-     top `LISTWISE_SURVIVORS` per chunk advance.
-  2. Repeat until at most `LISTWISE_WINDOW` candidates remain.
-  3. Final round: rank the survivor pool twice with two different shuffles,
-     then merge the two rankings via Borda count to produce the top-k
-     output. This is the cheap form of permutation self-consistency.
-
-Known caveats. Chunk size 200 is aggressive relative to RankGPT's w=20
-empirical sweet spot, but is forced by corpus scale (38K leaves at the
-finest granularity makes w<=50 cost-prohibitive). The shuffle plus final
-consistency partially mitigate the resulting Lost-in-the-Middle effect
-documented by Liu et al. TACL 2024.
-
-The LLM sees node metadata only (node_id, doc_title, title, navigation_path,
-summary), not full leaf text, so 200 candidates fit comfortably under
-Gemini 2.5 Flash Lite's 1M input budget at roughly 28K tokens per call.
+Ranks all leaf nodes using listwise LLM calls in a multi-round
+elimination tournament. Each round shuffles the pool, splits it into
+chunks, and advances the top survivors per chunk. The final round
+ranks survivors twice with different shuffles and merges via Borda
+count. The LLM sees metadata only (title, summary, navigation_path),
+not full leaf text.
 
 Usage:
     python -m vectorless.retrieval.llm.flat "Apa syarat penyadapan?"
@@ -46,19 +27,10 @@ from ..common import (
 
 LISTWISE_WINDOW = 400      # candidates per LLM ranking call
 LISTWISE_SURVIVORS = 20    # top-K kept from each chunk to advance to next round
-# Window=400 chosen after empirical test (2026-05-14): with compound doc_id/node_id
-# refs and top-K (not full ranking) output schema, Gemini Flash Lite handled 5/5
-# test chunks with 0% dupes and 1% hallucinations. Halves total LLM calls at
-# rincian (107 vs 213) vs window=200 baseline. Still well below 1M input context.
 
 
 def _query_seed(query: str) -> int:
-    """Derive a deterministic int seed from a query string.
-
-    Reproducibility is required so that re-running the same eval query
-    yields the same shuffle and final ranking. md5 is used purely as a
-    string hasher, not for cryptographic strength.
-    """
+    """Derive a deterministic int seed from a query string."""
     return int(hashlib.md5(query.encode("utf-8")).hexdigest()[:8], 16)
 
 
@@ -84,14 +56,16 @@ def _borda_merge(ranking_a: list[str], ranking_b: list[str], top_k: int) -> list
 def _build_rank_prompt(query: str, candidates: list[dict], top_k: int) -> str:
     """Build the top-K selection prompt for one chunk of candidates.
 
-    Output is asked as a short top-K list of compound `ref` strings of
-    the form "doc_id/node_id", not bare node_ids. Plain node_ids are not
-    unique across documents (same `pasal_1` exists in many docs), so at
-    chunk sizes >=400 the LLM would otherwise hallucinate its own
-    composite form and fail validation. Output is also intentionally
-    minimal (no thinking field) to keep each response short and avoid
-    the repetition loops we observed when asking for a full N-item
-    listwise ranking.
+    Candidates are identified by compound refs (doc_id/node_id). The
+    prompt asks for a short top-K list only, not a full ranking.
+
+    Args:
+        query: Legal question in Indonesian.
+        candidates: Candidate dicts with ref and metadata fields.
+        top_k: Number of top candidates the LLM should select.
+
+    Returns:
+        Formatted prompt string.
     """
     n = len(candidates)
     candidates_text = json.dumps(candidates, ensure_ascii=False, indent=2)
@@ -126,15 +100,19 @@ Aturan ketat:
 
 
 def _select_top_from_chunk(query: str, chunk: list[dict], top_k: int) -> list[dict]:
-    """Ask LLM to pick the top-`top_k` candidates from one chunk, ordered.
+    """Ask the LLM to pick the top candidates from one chunk.
 
-    Uses compound `doc_id/node_id` refs as the unique id shown to the LLM,
-    not plain `node_id`. Plain `node_id` is not unique across documents
-    (e.g. `pasal_1` exists in many docs), so at large chunk sizes the LLM
-    must disambiguate. Without compound refs the LLM observed to invent
-    its own composite form like `pasal_1_uu-3-2024`, which then fails
-    validation as hallucinated. Compound refs make the disambiguation
-    explicit in the schema.
+    Each candidate is identified by a compound ref (doc_id/node_id).
+    Invalid or missing refs are padded with input order so downstream
+    slicing is stable.
+
+    Args:
+        query: Legal question in Indonesian.
+        chunk: List of leaf node dicts for this chunk.
+        top_k: Number of top candidates to select.
+
+    Returns:
+        Reordered list of leaf dicts, best first.
     """
     candidates_for_prompt = [
         {
@@ -177,34 +155,24 @@ def flat_search(query: str, leaves: list[dict],
                 window_size: int = LISTWISE_WINDOW,
                 survivors_per_chunk: int = LISTWISE_SURVIVORS,
                 top_k: int = 10, verbose: bool = True) -> dict:
-    """Chunked elimination tournament LLM ranking with shuffle mitigation.
+    """Run a multi-round elimination tournament over all leaf nodes.
 
-    Algorithm:
-      1. Round r: shuffle pool deterministically per query, split into
-         chunks of `window_size`. LLM ranks each chunk listwise; top
-         `survivors_per_chunk` advance.
-      2. Repeat until len(candidates) <= window_size.
-      3. Final pass: rank the survivor pool twice with two different
-         shuffles, merge via Borda count, return top-k.
-
-    Inter-round shuffle mitigates the chunk-assignment lottery where a
-    relevant leaf may win an easy chunk while a relevant leaf in a
-    competitive chunk gets eliminated. Tang et al. NAACL 2024 documents
-    34-52 percent position-bias gains from permutation self-consistency
-    on Mistral-class models.
+    Each round shuffles the pool, splits into chunks of window_size,
+    and advances the top survivors_per_chunk from each chunk. The final
+    round ranks survivors twice with different shuffles and merges via
+    Borda count.
 
     Args:
         query: Legal question in Indonesian.
         leaves: All leaf nodes from all documents.
-        window_size: Max candidates per LLM call (default 200).
-        survivors_per_chunk: Top-K kept per chunk per round (default 20).
-        top_k: Final number of leaves to return (default 10).
+        window_size: Maximum candidates per LLM call.
+        survivors_per_chunk: Number of candidates kept per chunk per round.
+        top_k: Final number of leaves to return.
         verbose: Print progress per round.
 
     Returns:
-        Dict with ranked_node_ids (top-k), candidates_shown (input size),
-        validated_ranking_length, rounds (per-round chunk count + survivors),
-        and total_llm_calls (sum across rounds).
+        Dict with ranked_node_ids, candidates_shown, rounds info,
+        and total_llm_calls.
     """
     candidates = list(leaves)
     rounds_info: list[dict] = []
@@ -282,18 +250,17 @@ def flat_search(query: str, leaves: list[dict],
 def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
              survivors_per_chunk: int = LISTWISE_SURVIVORS,
              top_k: int = 10, verbose: bool = True) -> dict:
-    """Full LLM flat retrieval pipeline.
+    """Run the full LLM flat retrieval pipeline.
 
-    1. Load all leaf nodes.
-    2. Chunked listwise LLM reranking via tournament elimination.
-    3. Build sources from final top-k ranking.
+    Loads all leaf nodes and ranks them through a chunked elimination
+    tournament.
 
     Args:
         query: Legal question in Indonesian.
-        window_size: Max candidates per LLM call.
-        survivors_per_chunk: Top-K kept per chunk per round.
+        window_size: Maximum candidates per LLM call.
+        survivors_per_chunk: Number of candidates kept per chunk per round.
         top_k: Final number of leaves to return.
-        verbose: Print progress.
+        verbose: Print progress to stdout.
 
     Returns:
         Dict with query, strategy, search results, sources, and metrics.

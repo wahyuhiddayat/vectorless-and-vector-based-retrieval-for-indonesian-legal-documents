@@ -1,16 +1,10 @@
-"""Agentic LLM retrieval for Indonesian legal QA, PageIndex-inspired.
+"""Agentic LLM retrieval for Indonesian legal QA.
 
-The LLM acts as an agent. The full document tree (titles + summaries)
-is exposed from the start — identical to PageIndex's
-get_document_structure() which returns all nodes. The agent uses
-expand() to re-focus on a subtree (visibility hint), read() to inspect
-leaf text, and submit() to finalize.
-
-doc_search picks one document from the catalog first (1 LLM call).
-After the agent loop, a three-layer fallback fills remaining top-k
-slots: agent submit → visited nodes → BM25 (scoped to the primary doc).
-Unlike PageIndex, BM25 fallback exists because the legal-eval pipeline
-requires fixed-width top-k output.
+The LLM acts as an agent that navigates the document tree using
+expand(), read(), and submit() tools. The full tree outline (titles
+and summaries) is shown upfront. Documents are selected first via
+LLM doc search, then the agent explores the picked documents to
+find relevant leaf nodes.
 
 Usage:
     python -m vectorless.retrieval.llm.agentic "Apa syarat penyadapan?"
@@ -34,11 +28,15 @@ from ..common import (
 
 
 def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K) -> list[str]:
-    """Rank catalog entries with BM25 over the doc corpus string, return doc_ids.
+    """Rank catalog entries with BM25 and return top doc_ids above zero.
 
-    Uses `doc_corpus_string` from common so the BM25 fallback in doc_search
-    benefits from the same aggregated-summary corpus used by bm25-tree and
-    hybrid-tree. Returns the top-K doc_ids that score above zero.
+    Args:
+        query: Legal question in Indonesian.
+        catalog: List of document metadata dicts.
+        top_k: Number of top documents to return.
+
+    Returns:
+        List of doc_id strings.
     """
     corpus = [tokenize(doc_corpus_string(doc)) for doc in catalog]
     bm25 = BM25Okapi(corpus)
@@ -49,16 +47,19 @@ def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_
 
 def doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K,
                verbose: bool = True) -> dict:
-    """Pick up to `top_k` relevant documents via pure LLM selection.
+    """Pick up to top_k relevant documents via LLM selection.
 
-    The LLM is asked to lean over-inclusive (1-3 docs) rather than refuse.
-    No BM25 fallback is used, keeping the method faithful to the Vectify
-    PageIndex architecture (pure LLM reasoning at every stage). The catalog
-    is placed in a system message so DeepSeek can prefix-cache the ~46K
-    token catalog across all 357 queries at each granularity.
+    The catalog is placed in the system message to enable prefix caching
+    across queries.
+
+    Args:
+        query: Legal question in Indonesian.
+        catalog: List of document metadata dicts.
+        top_k: Maximum number of documents to select.
+        verbose: Print selected documents to stdout.
 
     Returns:
-        Dict with `doc_ids` (capped at top_k), `llm_doc_ids`, and `thinking`.
+        Dict with doc_ids, llm_doc_ids, and thinking.
     """
     slim_catalog = catalog_for_llm_prompt(catalog)
     docs_text = json.dumps(slim_catalog, ensure_ascii=False, indent=2)
@@ -168,12 +169,13 @@ def _render_tree_outline(nodes: list[dict], depth: int = 0) -> str:
 
 
 def _render_multidoc_outline(picked_docs: dict[str, dict]) -> str:
-    """Render outlines for K picked docs, concatenated with doc headers.
+    """Render outlines for all picked docs, concatenated with doc headers.
 
-    Each doc section is prefixed with `=== DOC: {doc_id} -- {judul} ===` so
-    the agent can target tools by doc_id. Node ids are still unique within
-    a doc (LLM parser guarantees this), but the agent must always include
-    doc_id when calling expand/read/submit.
+    Args:
+        picked_docs: Mapping of doc_id to loaded document dict.
+
+    Returns:
+        Concatenated outline string with doc headers.
     """
     parts: list[str] = []
     for doc_id, doc in picked_docs.items():
@@ -233,12 +235,17 @@ def _tool_read(picked_docs: dict[str, dict], doc_id: str, node_id: str) -> dict:
 
 
 def _parse_node_ref(ref, default_doc_id: str | None = None) -> tuple[str | None, str | None]:
-    """Accept dict, 'doc_id/node_id' string, or bare node_id.
+    """Parse a node reference into (doc_id, node_id).
 
-    Multi-doc mode requires the agent to always provide `doc_id` either as a
-    dict field, as a path prefix, or implicitly via `default_doc_id`. A bare
-    node_id without any doc_id context returns (None, node_id) which the
-    caller should reject as ambiguous.
+    Accepts a dict with doc_id/node_id fields, a "doc_id/node_id" string,
+    or a bare node_id (resolved with default_doc_id).
+
+    Args:
+        ref: Dict, compound string, or bare node_id.
+        default_doc_id: Fallback doc_id for bare node_ids.
+
+    Returns:
+        Tuple of (doc_id, node_id). Either may be None if unresolvable.
     """
     if isinstance(ref, dict):
         return ref.get("doc_id") or default_doc_id, ref.get("node_id")
@@ -271,22 +278,26 @@ def _render_scratchpad(scratchpad: list[dict]) -> str:
 
 def _anti_loop_hints(scratchpad: list[dict], actions_used: int, reads_used: int,
                      max_actions: int, max_reads: int) -> list[str]:
-    """Return adaptive steering hints when the agent shows signs of stalling.
+    """Return steering hints when the agent may be stalling.
 
-    Watches for three failure modes observed in run03 outliers:
-    1. Repeated identical action+args in last 3 steps (agent stuck in loop).
-    2. Budget approaching exhaustion without a submit (action_used > 60%).
-    3. Read budget mostly spent (reads_used > 70%) without submit.
+    Detects repeated identical actions, approaching action budget
+    exhaustion, and near-depleted read budget.
 
-    Hints get rendered as a prompt section so the agent sees them next turn.
-    Empty list when nothing fires.
+    Args:
+        scratchpad: List of past action/observation entries.
+        actions_used: Number of actions taken so far.
+        reads_used: Number of read calls used so far.
+        max_actions: Total action budget.
+        max_reads: Total read budget.
+
+    Returns:
+        List of hint strings. Empty if no issues detected.
     """
     hints: list[str] = []
     submitted = any(e.get("action") == "submit"
                     and not (e.get("observation") or {}).get("error")
                     for e in scratchpad)
 
-    # 1. Repeated identical (action, args) detection
     recent = [e for e in scratchpad[-3:]
               if e.get("action") in ("expand", "read", "inspect_doc")]
     if len(recent) >= 3:
@@ -301,7 +312,6 @@ def _anti_loop_hints(scratchpad: list[dict], actions_used: int, reads_used: int,
                 "Ganti strategi: pilih node lain, atau submit ranking final sekarang."
             )
 
-    # 2. Action budget warning (no submit yet)
     if not submitted and actions_used >= int(max_actions * 0.6):
         remaining = max_actions - actions_used
         hints.append(
@@ -309,7 +319,6 @@ def _anti_loop_hints(scratchpad: list[dict], actions_used: int, reads_used: int,
             "Submit ranking final sekarang berdasarkan info yang ada."
         )
 
-    # 3. Read budget warning
     if not submitted and reads_used >= int(max_reads * 0.7):
         remaining = max_reads - reads_used
         hints.append(
@@ -325,15 +334,23 @@ def _build_prompt_parts(query: str, scratchpad: list[dict],
                         picked_docs: dict[str, dict],
                         multidoc_outline: str,
                         steering_hints: list[str] | None = None) -> tuple[str, str]:
-    """Build the next-step prompt for the agent in multi-doc mode.
+    """Build the system and user messages for the next agent step.
 
-    Returns (system, prompt). The system message contains the static context
-    that is identical across all agent steps for one query (instructions,
-    query, doc outlines, tools, workflow). DeepSeek auto-caches the system
-    prefix across consecutive calls, so steps 2-N get prefix-cache hits.
+    Static context (instructions, query, outlines, tools) goes in the
+    system message. Dynamic content (budget, hints, scratchpad) goes in
+    the user message.
 
-    The prompt (user message) contains only the per-step dynamic content
-    (budget, steering hints, scratchpad).
+    Args:
+        query: Legal question in Indonesian.
+        scratchpad: List of past action/observation entries.
+        actions_left: Remaining action budget.
+        reads_left: Remaining read budget.
+        picked_docs: Mapping of doc_id to loaded document dict.
+        multidoc_outline: Pre-rendered outline of all picked docs.
+        steering_hints: Optional anti-loop hints to inject.
+
+    Returns:
+        Tuple of (system message, user message).
     """
     doc_headers = "\n".join(
         f"  - {did} -- {doc.get('judul', '')}"
@@ -415,15 +432,24 @@ def retrieve(query: str,
              max_actions: int = MAX_ACTIONS, max_reads: int = MAX_READS,
              top_k: int = DEFAULT_TOP_K, top_k_docs: int = DOC_PICK_TOP_K,
              verbose: bool = True) -> dict:
-    """Run the multi-doc agentic LLM retrieval pipeline for one query.
+    """Run the full agentic LLM retrieval pipeline.
 
-    Stage 1: LLM + BM25 merged doc-pick (top-K=3 by default).
-    Stage 2: agent loop, full outline of all picked docs exposed upfront,
-        tools require `doc_id` arg, submit accepts `doc_id/node_id` refs.
-    Stage 3: agentic_finalize returns the agent's submitted refs only,
-        deduplicated and truncated to top_k. Output may be shorter than
-        top_k when the agent submits fewer candidates. No BM25 or visited
-        padding, see common.agentic_finalize for rationale.
+    Selects documents via LLM doc search, then runs an agent loop
+    where the LLM explores document trees using expand, read, and
+    submit tools. The agent's submitted refs are deduplicated and
+    truncated to top_k.
+
+    Args:
+        query: Legal question in Indonesian.
+        max_actions: Hard cap on total agent steps.
+        max_reads: Hard cap on read tool calls.
+        top_k: Maximum number of results to return.
+        top_k_docs: Number of documents selected at stage 1.
+        verbose: Print progress to stdout.
+
+    Returns:
+        Dict with query, strategy, doc search, agent trace, sources,
+        and metrics.
     """
     reset_counters()
     t_start = time.time()
