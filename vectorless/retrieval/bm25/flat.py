@@ -1,12 +1,8 @@
-"""
-BM25 flat (single-stage) retrieval for Indonesian legal QA.
+"""BM25 flat retrieval for Indonesian legal QA.
 
-Instead of 2-stage (doc search → node search), this searches ALL leaf nodes
-from ALL documents at once. Each leaf node's text is enriched with document
-title and navigation path for better keyword matching.
-
-This is the IR-standard way to use BM25 (flat corpus search), avoiding the
-cascading failure problem where doc-level metadata mismatch blocks retrieval.
+Searches all leaf nodes across all documents in a single stage.
+Each leaf is enriched with its document title and navigation path
+before scoring.
 
 Usage:
     python -m vectorless.retrieval.bm25.flat "Apa syarat penyadapan?"
@@ -24,18 +20,22 @@ from ..common import (
 )
 
 
-# ============================================================
-# FLAT SEARCH (single-stage across all documents)
-# ============================================================
-
 def flat_search(query: str, leaves: list[dict], top_k: int = 10,
                 verbose: bool = True) -> list[dict]:
-    """BM25 search across ALL leaf nodes from ALL documents.
+    """Score all leaf nodes with BM25 and return the top results.
 
-    Each leaf's text is enriched with doc title and navigation path
-    for better keyword coverage (metadata enrichment).
+    Each leaf is enriched with doc_title, navigation_path, text, and
+    penjelasan before tokenization.
+
+    Args:
+        query: Legal question in Indonesian.
+        leaves: All leaf nodes loaded from the corpus.
+        top_k: Maximum number of results to return.
+        verbose: Print ranked results to stdout.
+
+    Returns:
+        List of result dicts sorted by BM25 score descending.
     """
-    # Build enriched corpus
     corpus = []
     for leaf in leaves:
         enriched = leaf["doc_title"] + " " + leaf["navigation_path"] + " " + leaf["text"]
@@ -47,7 +47,7 @@ def flat_search(query: str, leaves: list[dict], top_k: int = 10,
     query_tokens = tokenize(query)
     scores = bm25.get_scores(query_tokens)
 
-    # Rank and filter (scan past top_k if some have score <= 0)
+    # Collect up to `target` results, skipping zero-score leaves
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
     target = max(top_k, 10)
     results = []
@@ -77,17 +77,19 @@ def flat_search(query: str, leaves: list[dict], top_k: int = 10,
     return results
 
 
-# ============================================================
-# MAIN PIPELINE
-# ============================================================
-
 def retrieve(query: str, top_k: int = 10, verbose: bool = True) -> dict:
-    """Full flat BM25 retrieval: load all leaves → search → answer.
+    """Run the full flat BM25 retrieval pipeline.
+
+    Loads all leaf nodes from the corpus, scores them with BM25,
+    and returns the top results with timing and token metrics.
 
     Args:
-        query: Legal question in Indonesian
-        top_k: Max results to retrieve
-        verbose: Print progress
+        query: Legal question in Indonesian.
+        top_k: Maximum number of results to return.
+        verbose: Print progress to stdout.
+
+    Returns:
+        Dict with query, strategy, search rankings, sources, and metrics.
     """
     reset_counters()
     t_start = time.time()
@@ -99,7 +101,6 @@ def retrieve(query: str, top_k: int = 10, verbose: bool = True) -> dict:
         print(f"Strategy: bm25-flat (top_k={top_k})")
         print(f"{'='*60}")
 
-    # Step 1: Load all leaf nodes + BM25 search
     snap = snapshot_counters()
     t_step = time.time()
 
@@ -147,13 +148,10 @@ def retrieve(query: str, top_k: int = 10, verbose: bool = True) -> dict:
     return result
 
 
-# ============================================================
-# CLI
-# ============================================================
-
 def main():
+    """CLI entry point for BM25 flat retrieval."""
     ap = argparse.ArgumentParser(
-        description="BM25 flat (single-stage) retrieval for Indonesian legal QA")
+        description="BM25 flat retrieval for Indonesian legal QA")
     ap.add_argument("query", help="Legal question in Indonesian")
     ap.add_argument("--top_k", type=int, default=10, help="Number of results (default: 10)")
     args = ap.parse_args()

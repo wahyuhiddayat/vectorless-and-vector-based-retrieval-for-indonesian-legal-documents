@@ -1,15 +1,9 @@
-"""BM25 hierarchical tree navigation for Indonesian legal QA.
+"""BM25 tree retrieval for Indonesian legal QA.
 
-Navigates the document tree level-by-level using BM25 scoring at each level.
-At each level, nodes are scored by their title and summary, and top-k are
-selected for drilling down. This is expected to perform poorly because
-node titles and summaries have limited keyword coverage compared to full text.
-
-The beam search uses title and summary for node scoring at intermediate
-levels, then re-ranks all collected leaves with full-text BM25 using the
-same enrichment as bm25-flat (doc_title + navigation_path + text + penjelasan).
-Summaries are LLM-generated at indexing time, not per query (0 LLM calls
-per query).
+Navigates the document tree level by level using BM25 beam search.
+Intermediate nodes are scored by title and summary, then all reached
+leaves are re-ranked with full-text BM25 using the same enrichment
+fields as bm25-flat. No LLM calls at query time.
 
 Usage:
     python -m vectorless.retrieval.bm25.tree "Apa syarat penyadapan?"
@@ -31,11 +25,8 @@ from ..common import (
 def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K) -> list[dict]:
     """Rank catalog entries with BM25 over the doc corpus string.
 
-    Corpus per doc comes from `doc_corpus_string` (metadata + the aggregated
-    `doc_summary_text` from indexing.build). The summary aggregation makes
-    the doc-pick BM25 signal comparable in scale to the leaf-level BM25 used
-    in stage 2 instead of the 15-20 token metadata-only baseline that caused
-    the 2026-05-13 pilot cascade failure.
+    Each document is represented by its metadata and aggregated summary
+    text from doc_corpus_string.
 
     Args:
         query: Legal question in Indonesian.
@@ -63,12 +54,7 @@ def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_
 
 
 def _bm25_level_search(query: str, nodes: list[dict], top_k: int = 3) -> list[dict]:
-    """Score non-leaf nodes at one tree level using BM25 on title and summary.
-
-    Used for navigation through aggregator levels (Bab, Bagian, Pasal-with-ayat).
-    These nodes do not have direct text content, so descriptors (title and
-    LLM-generated summary) are the natural representation for pruning the
-    subtree search.
+    """Score nodes at one tree level using BM25 on title and summary.
 
     Args:
         query: Legal question in Indonesian.
@@ -107,18 +93,14 @@ def _bm25_level_search(query: str, nodes: list[dict], top_k: int = 3) -> list[di
 
 def _bm25_leaf_search(query: str, leaves: list[dict], doc_title: str,
                       top_k: int = 3) -> list[dict]:
-    """Score leaf nodes using BM25 on the same fields as bm25-flat.
+    """Score leaf nodes with BM25 over doc_title, navigation_path, text, and penjelasan.
 
-    Leaf nodes are the decision-point of bm25-tree (the final ranking output).
-    To preserve decision-point fairness with bm25-flat, leaves are scored over
-    `doc_title + navigation_path + text + penjelasan`, the same fields that
-    bm25-flat uses per leaf. Summary is excluded by design (already consumed
-    in the beam navigation stage).
+    Uses the same enrichment fields as bm25-flat for consistency.
 
     Args:
         query: Legal question in Indonesian.
-        leaves: List of leaf nodes (terminal nodes without children).
-        doc_title: Document title (judul) from the parent doc context.
+        leaves: List of leaf nodes without children.
+        doc_title: Document title from the parent document.
         top_k: Number of top leaves to select.
 
     Returns:
@@ -155,35 +137,25 @@ def _bm25_leaf_search(query: str, leaves: list[dict], doc_title: str,
 
 def tree_search(query: str, doc: dict, top_k_per_level: int = 3,
                 top_k: int = 10, verbose: bool = True) -> dict:
-    """Navigate the document tree using BM25 beam search; rank leaves at the end.
+    """Navigate a document tree with BM25 beam search and re-rank leaves.
 
-    Two-phase design:
-      1. Beam navigation. At each non-leaf level, BM25 scores nodes by
-         title+summary and selects top `top_k_per_level` to drill into.
-         Any leaf encountered at a beam level is added to the candidate
-         pool (preserved across iterations, not discarded when the loop
-         continues to deeper levels).
-      2. Final ranking. After the beam exits (all reached, no children
-         left, or max_rounds hit), BM25 re-scores the full candidate pool
-         on doc_title+navigation_path+text+penjelasan (identical to
-         bm25-flat for decision-point fairness) and returns top `top_k`.
+    Phase 1 walks the tree level by level, selecting top_k_per_level
+    nodes by title and summary at each non-leaf level. Leaves found at
+    any depth are accumulated into a candidate pool.
 
-    The pool accumulator avoids the earlier bug where leaves selected
-    at mixed-depth intermediate levels were dropped when the iteration
-    continued. With heterogeneous legal-document trees (some Bab skip
-    Bagian directly to Pasal), this preserved every leaf the beam
-    deemed promising.
+    Phase 2 re-scores the entire candidate pool with full-text BM25
+    and returns the top results.
 
     Args:
         query: Legal question in Indonesian.
-        doc: Loaded document dict with structure field.
-        top_k_per_level: Beam width during traversal.
-        top_k: Final number of leaves to return after pool re-ranking.
-        verbose: Print progress.
+        doc: Loaded document dict with a structure field.
+        top_k_per_level: Beam width at each navigation level.
+        top_k: Number of leaves to return after final re-ranking.
+        verbose: Print progress to stdout.
 
     Returns:
-        Dict with steps (navigation trace), node_ids (final ranked leaves),
-        and pool_size (number of leaves the beam reached, for diagnostics).
+        Dict with steps (navigation trace), node_ids (ranked leaf ids),
+        and pool_size (total leaves reached by the beam).
     """
     structure = doc["structure"]
     doc_title = doc.get("judul", "")
@@ -194,6 +166,7 @@ def tree_search(query: str, doc: dict, top_k_per_level: int = 3,
     seen_leaf_ids: set[str] = set()
 
     def _add_to_pool(leaves_to_add):
+        """Append unseen leaves to the candidate pool."""
         for leaf in leaves_to_add:
             lid = leaf.get("node_id", "")
             if lid and lid not in seen_leaf_ids:
@@ -274,24 +247,18 @@ def tree_search(query: str, doc: dict, top_k_per_level: int = 3,
 
 def retrieve(query: str, top_k_per_level: int = 3, top_k: int = 10,
              top_k_docs: int = DOC_PICK_TOP_K, verbose: bool = True) -> dict:
-    """Full BM25 tree retrieval pipeline, multi-doc top-K.
+    """Run the full BM25 tree retrieval pipeline across multiple documents.
 
-    1. BM25 doc search to select top-K docs from catalog.
-    2. BM25 tree navigation level-by-level in each picked doc.
-    3. Cross-doc merge of reached leaves, BM25 final re-rank globally.
-
-    Multi-doc top-K=3 (default) follows IR multi-stage-retrieval practice.
-    The doc-pick stage still exploits catalog-level structure (paradigm
-    distinction from flat methods), and the within-doc beam still
-    exploits hierarchical structure, but the candidate pool spans up to
-    K docs to soften single-doc cascade failures.
+    Selects top documents from the catalog with BM25, runs beam-based
+    tree search in each, merges all reached leaves, and re-ranks
+    them globally with full-text BM25.
 
     Args:
         query: Legal question in Indonesian.
-        top_k_per_level: Beam width during traversal (paradigm choice).
-        top_k: Final number of leaves to return (matches eval cutoff).
-        top_k_docs: Number of docs picked at stage 1.
-        verbose: Print progress.
+        top_k_per_level: Beam width during tree traversal.
+        top_k: Final number of leaves to return.
+        top_k_docs: Number of documents selected at stage 1.
+        verbose: Print progress to stdout.
 
     Returns:
         Dict with query, strategy, search results, sources, and metrics.
