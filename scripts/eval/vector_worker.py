@@ -1,39 +1,13 @@
 """Subprocess worker for vector RAG evaluation.
 
-Two operating modes.
-
-Single-query mode (legacy, useful for debugging).
-    Pass --query "..." and the worker runs once and exits with one JSON
-    payload on stdout. Same as the original behaviour.
-
-Batch mode (default when --query is omitted).
-    Worker reads newline-delimited JSON objects from stdin, one per query,
-    keeps the embedding model and reranker resident in GPU memory across
-    queries, and writes one JSON payload per query to stdout (flushed each
-    line). A line equal to "--DONE--" ends the loop cleanly. Eliminates the
-    per-query model-reload overhead that dominated wall time in earlier runs.
-
-stdin schema (batch mode):
-    {"qid": "q033", "query": "Apa syarat penyadapan?", "top_k": 10}
-
-stdout schema (one payload per input line, qid preserved for matching):
-    {"qid": "q033", "ok": true, "system": "vector-dense",
-     "granularity": "pasal", "embedding_model": "bge-m3",
-     "reranker": "none", "collection": "law-pasal-bgem3",
-     "llm_model": null, "result": {...}}
+Supports single-query mode (--query) and batch mode (stdin). Batch mode
+keeps the embedding model and reranker resident in GPU memory across
+queries to avoid per-query reload overhead.
 
 Usage:
-    # Single-query (debug)
     python scripts/eval/vector_worker.py \\
         --system vector-dense --granularity pasal \\
         --embedding-model bge-m3 --query "Apa syarat penyadapan?" \\
-        --qdrant-path ./qdrant_local
-
-    # Batch (driven by the orchestrator)
-    echo '{"qid":"q1","query":"Apa syarat?","top_k":10}\\n--DONE--' | \\
-      python scripts/eval/vector_worker.py \\
-        --system vector-dense --granularity pasal \\
-        --embedding-model bge-m3 --reranker none \\
         --qdrant-path ./qdrant_local
 """
 
@@ -120,7 +94,7 @@ def main() -> int:
                     help="Path to local Qdrant storage directory")
     args = ap.parse_args()
 
-    # Env vars must be set BEFORE importing vector modules, they read at import time.
+    # Env vars must be set before importing vector modules.
     model_short = _MODEL_SHORT[args.embedding_model]
     collection = f"law-{args.granularity}-{model_short}"
     os.environ["VECTOR_EMBEDDING_MODEL"] = args.embedding_model
@@ -130,18 +104,14 @@ def main() -> int:
     if args.qdrant_path:
         os.environ["QDRANT_PATH"] = args.qdrant_path
 
-    # Suppress library warnings before importing transformers / sentence-transformers.
-    # Orchestrator parses stdout line-by-line as JSON; a stray warning would corrupt
-    # the stream and fail the whole combo.
+    # Suppress library warnings to keep stdout clean for JSON parsing.
     import warnings
     import logging
     warnings.filterwarnings("ignore")
     logging.getLogger("transformers").setLevel(logging.ERROR)
     logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 
-    # Import once. First retrieve() call loads the embedding model and (optionally)
-    # the reranker into GPU memory. Subsequent calls reuse the module-level caches
-    # in vector/common.py and vector/rerank.py.
+    # Import once, subsequent calls reuse module-level caches.
     from vector.retrieve_vector import retrieve
     from vector.common import embed_queries
 
@@ -160,11 +130,7 @@ def main() -> int:
         print(json.dumps(payload, ensure_ascii=False))
         return 0
 
-    # Batch mode. Collect all stdin lines first, batch-encode every query in one
-    # GPU forward pass, then loop per-query for the qdrant + rerank stages (qdrant
-    # API takes one vector at a time). Trade-off: stdout is no longer streamed
-    # line-by-line — orchestrator reads the whole stdout buffer after the process
-    # exits anyway, so latency-to-first-byte doesn't matter here.
+    # Batch mode. Collect stdin, batch-encode in one forward pass, then retrieve per query.
     pending: list[dict] = []
     parse_errors: list[dict] = []
     for raw_line in sys.stdin:

@@ -8,13 +8,7 @@ from .metrics import SLICE_FIELDS, rank_distribution_stats, safe_mean
 
 
 def _pct(values: list[float], p: float) -> float:
-    """Percentile via linear interpolation between order statistics.
-
-    Reports tail behaviour (p95, p99) that the mean hides. Useful for cost
-    metrics where a few outlier queries dominate the worst case, e.g. an
-    agentic retriever that occasionally burns its full action budget on a
-    single query.
-    """
+    """Percentile via linear interpolation between order statistics."""
     if not values:
         return 0.0
     s = sorted(values)
@@ -32,12 +26,7 @@ BOOTSTRAP_CI = 0.95
 
 
 def _bootstrap_ci(values: list[float], resamples: int, seed: int, ci: float) -> dict:
-    """Percentile bootstrap confidence interval of the mean.
-
-    Hit/miss is Bernoulli. A paired t-test would assume normality which does
-    not hold, so we use percentile bootstrap. Cheap (1000 resamples on ~150
-    queries is sub-second) and well understood by reviewers.
-    """
+    """Percentile bootstrap confidence interval of the mean."""
     n = len(values)
     if n < 2:
         return {"mean": safe_mean(values), "ci_low": 0.0, "ci_high": 0.0, "n": n}
@@ -78,9 +67,7 @@ def aggregate_records(records: list[dict], cutoffs: list[int]) -> dict:
         "full_reciprocal_rank": safe_mean([row.get("full_reciprocal_rank", 0.0) for row in records]),
     }
 
-    # Headline metrics for the thesis: hit@k, recall@k, mrr@k.
-    # Completeness: precision@k, f1@k, ndcg@k, dcg@k, map@k.
-    # Diagnostic: sibling_hit@k (failure analysis, see metrics module N4).
+    # Retrieval metrics per cutoff.
     for k in cutoffs:
         summary[f"hit@{k}"] = safe_mean([row.get(f"hit@{k}", 0.0) for row in records])
         summary[f"recall@{k}"] = safe_mean([row.get(f"recall@{k}", 0.0) for row in records])
@@ -94,8 +81,7 @@ def aggregate_records(records: list[dict], cutoffs: list[int]) -> dict:
             [row.get(f"sibling_hit@{k}", 0.0) for row in records]
         )
 
-    # Cost/latency distribution percentiles. avg + total alone hide outliers;
-    # p50/p95/p99 give the typical query, headroom, and worst-case tail.
+    # Cost and latency distribution percentiles.
     elapsed_vals = [float(row.get("elapsed_s", 0.0)) for row in records]
     token_vals = [float(row.get("total_tokens", 0)) for row in records]
     input_token_vals = [float(row.get("input_tokens", 0)) for row in records]
@@ -110,9 +96,7 @@ def aggregate_records(records: list[dict], cutoffs: list[int]) -> dict:
 
     summary["exact_top1_hit_rate"] = safe_mean([float(row.get("exact_top1_hit", False)) for row in records])
 
-    # Tree-paradigm stage-1 vs stage-2 attribution. For flat methods these
-    # fields are vacuously zero (no doc-pick stage), for tree methods they
-    # let us distinguish doc-pick failure from within-doc nav failure.
+    # Stage-1 vs stage-2 attribution for tree methods.
     summary["doc_pick_hit_rate"] = safe_mean(
         [float(row.get("doc_pick_hit", 0.0)) for row in records]
     )
@@ -208,12 +192,7 @@ def compute_combo_confidence_intervals(
     granularities: list[str],
     cutoffs: list[int],
 ) -> list[dict]:
-    """Bootstrap CIs for the headline metrics per (system, granularity) combo.
-
-    Headline metrics, recall@k for each k in cutoffs plus mrr@max_k. These
-    are the metrics RQ1, RQ2, and RQ3 are reported on. Other metrics can be
-    bootstrapped on demand from the per-query JSONL files.
-    """
+    """Bootstrap CIs for the headline metrics per (system, granularity) combo."""
     out: list[dict] = []
     headline_metrics = [f"recall@{k}" for k in cutoffs] + [f"mrr@{max(cutoffs)}"]
     for system in systems:
@@ -246,11 +225,7 @@ def compute_reference_mode_breakdown(
     granularities: list[str],
     cutoffs: list[int],
 ) -> list[dict]:
-    """Per-reference_mode breakdown of headline metrics.
-
-    Surfaces whether the winner system shifts across reference_mode buckets
-    (none, legal_ref, doc_only, both). Important for RQ3 narrative.
-    """
+    """Per-reference_mode breakdown of headline metrics."""
     modes = ["none", "legal_ref", "doc_only", "both"]
     out: list[dict] = []
     for system in systems:

@@ -1,9 +1,7 @@
 """On-demand paired significance test between two eval combos.
 
-Designed for RQ3 head-to-head, given the winners of RQ1 and RQ2, compute
-paired-randomization p-value, paired t-test p-value, and Cohen's d on the
-shared query set. Uses the existing per-query records.jsonl files, no
-re-running of queries needed.
+Computes paired-randomization p-value, paired t-test p-value, and Cohen's d
+on the shared query set. Uses existing per-query records, no re-running needed.
 
 Usage:
     # Compare hybrid x ayat (vectorless run) vs vector-dense:bge-m3 x pasal
@@ -46,13 +44,7 @@ DEFAULT_METRICS = ["recall@10", "mrr@10", "recall@5", "recall@1"]
 
 
 def load_combo_records(run_dir: Path, system: str, granularity: str) -> dict[str, dict]:
-    """Return {query_id: record} for one (system, granularity) combo.
-
-    Reads every JSONL file under run_dir/records/ and filters to the requested
-    combo. The system field can be a synthetic "vector-dense:bge-m3" form
-    used by the vector harness, in which case records carry that exact
-    string after finalize re-keying.
-    """
+    """Return {query_id: record} for one (system, granularity) combo."""
     records_dir = run_dir / "records"
     if not records_dir.exists():
         raise SystemExit(f"records directory not found, {records_dir}")

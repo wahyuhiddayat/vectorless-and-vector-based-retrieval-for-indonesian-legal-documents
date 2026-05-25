@@ -72,18 +72,7 @@ def load_query_expansion(path: Path, expected_split_fingerprint: str) -> dict[st
     """Load expanded queries from cache, validate split fingerprint.
 
     Returns dict qid to expanded_query_text. Raises FileNotFoundError if the
-    cache is missing, ValueError if the cache was built for a different split
-    (guards against accidental cross-split contamination).
-
-    Args:
-        path: Path to the expansion JSON file (typically
-            data/query_expansion/<split>_expanded.json).
-        expected_split_fingerprint: Sha256 of the qid list for the split the
-            eval is about to run. Must match the fingerprint stored in the
-            cache metadata.
-
-    Returns:
-        Mapping qid to expanded query text.
+    cache is missing, ValueError if the fingerprint does not match.
     """
     if not path.exists():
         raise FileNotFoundError(
@@ -103,16 +92,7 @@ def load_query_expansion(path: Path, expected_split_fingerprint: str) -> dict[st
 
 
 def query_expansion_fingerprint(path: Path) -> dict:
-    """Return cache metadata plus content sha256 for config.json recording.
-
-    Args:
-        path: Path to the expansion JSON file.
-
-    Returns:
-        Dict with path, sha256 of the file contents, prompt version, model
-        name, and query count. Used by eval orchestrators to record exactly
-        which expansion cache was used for reproducibility.
-    """
+    """Return cache metadata plus content sha256 for config.json recording."""
     with open(path, "rb") as f:
         sha = hashlib.sha256(f.read()).hexdigest()
     with open(path, "r", encoding="utf-8") as f:
@@ -138,11 +118,9 @@ def select_queries(
 ) -> list[tuple[str, dict]]:
     """Select a query subset for evaluation.
 
-    Filtering precedence, split -> doc_id -> query_types -> per_type_limit -> query_limit.
-    The split filter reads data/splits/<split>_qids.json. Test split is sealed,
-    callers must set EVAL_ALLOW_TEST=1 to opt in. per_type_limit picks N items
-    per query_type (stratified). When combined with random_seed the selection
-    within each type is sampled rather than head-of-list.
+    The split filter reads data/splits/<split>_qids.json. Test split is
+    sealed, callers must set EVAL_ALLOW_TEST=1 to opt in. per_type_limit
+    picks N items per query_type (stratified).
     """
     items = sorted(testset.items(), key=lambda kv: kv[0])
     if split:
@@ -232,9 +210,7 @@ def read_records_file(path: Path, *, validate: bool = False) -> list[dict]:
     """Load all records from one JSONL file. Tolerates empty / missing file.
 
     With validate=True, drops records that are missing any required field.
-    Returns the dropped count alongside the records via the side-channel
-    last_invalid_records[]. Used on resume to skip rows that may have been
-    written before a crash mid-flush.
+    Stashes the dropped count in last_invalid_count for the runner to log.
     """
     if not path.exists():
         return []

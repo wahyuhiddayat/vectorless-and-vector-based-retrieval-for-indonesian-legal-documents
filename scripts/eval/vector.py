@@ -4,9 +4,6 @@ Evaluates the vector-dense retrieval system across granularities (pasal,
 ayat, rincian) and embedding models, then writes the same artifact set as
 vectorless.py for an apples-to-apples comparison.
 
-Reuses every scoring function from scripts.eval.core, so RQ1 and RQ2 numbers
-are computed by identical code paths.
-
 Usage:
     python scripts/eval/vector.py --label main_rq2_140q --qdrant-path ./qdrant_local
     python scripts/eval/vector.py --label main_rq2_140q --resume --qdrant-path ./qdrant_local
@@ -91,10 +88,8 @@ _BATCH_END_SENTINEL = "--DONE--"
 def _combo_timeout_seconds(queries_count: int, per_query_budget_s: int) -> int:
     """Compute a generous combo-wide subprocess timeout.
 
-    Model load happens once per worker process (~30-60s on cold disk, ~10-15s
-    warm). Per-query retrieval is ~3-8s for none/bge rerank, ~10-20s for qwen3.
-    The orchestrator passes per_query_budget_s as the user-visible knob; we
-    convert it to a total combo budget that includes one model-load reservation.
+    Converts a per-query budget to a total that includes one model-load
+    reservation.
     """
     model_load_budget = 180  # 3 minutes for cold model download + GPU load
     return max(model_load_budget + per_query_budget_s * queries_count, 600)
@@ -113,10 +108,6 @@ def invoke_vector_worker_batch(
     query_overrides: dict[str, str] | None = None,
 ) -> tuple[dict[str, dict], str, str, str | None]:
     """Spawn one worker subprocess per combo, pipe all queries via stdin.
-
-    The worker keeps the embedding model (and optional reranker) loaded across
-    every query in the batch, eliminating the per-query model-reload overhead
-    that previously dominated wall time.
 
     Args:
         query_overrides: Optional mapping qid to alternative query text. When
@@ -556,9 +547,7 @@ def main() -> int:  # noqa: C901
     wall_s = (completed_at - started_at).total_seconds()
     all_records = eval_io.read_all_records(records_dir)
 
-    # Synthetic system label "<system>:<embedding_model>:<reranker>" so the existing
-    # aggregator (which groups by system x granularity) treats each (embedding, reranker)
-    # combo as its own system. Mirrors how RQ2 reports compare across model+reranker.
+    # Synthetic system label so the aggregator treats each (embedding, reranker) as its own system.
     for r in all_records:
         if r.get("system") and r.get("embedding_model"):
             rerank_part = r.get("reranker", "none") or "none"
@@ -588,7 +577,7 @@ def main() -> int:  # noqa: C901
     eval_io.write_csv(run_dir / "summary_by_slice.csv", slice_rows)
     eval_io.write_csv(run_dir / "summary_by_reference_mode.csv", ref_mode_rows)
 
-    # Diagnostic only failure analysis, see metrics module N4.
+    # Diagnostic failure analysis.
     failure_analysis: dict[str, dict] = {}
     for system in synthetic_systems:
         for granularity in args.granularities_list:

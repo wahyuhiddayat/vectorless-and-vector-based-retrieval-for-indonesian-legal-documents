@@ -60,6 +60,7 @@ _5XX_PATTERNS = ("500", "502", "503", "504", "service unavailable", "overloaded"
 
 
 def categorise_error(message: str) -> str:
+    """Classify an error message into a broad category string."""
     if not message:
         return ""
     low = message.lower()
@@ -79,6 +80,7 @@ def categorise_error(message: str) -> str:
 
 
 def is_retryable(category: str) -> bool:
+    """Return True if the error category is eligible for retry."""
     return category in {"network", "rate-limit", "worker-crash"}
 
 
@@ -103,6 +105,7 @@ def invoke_worker(
     top_k: int,
     timeout_s: int,
 ) -> tuple[dict | None, str, str]:
+    """Run the worker subprocess and return (payload, stdout, stderr)."""
     cmd = [
         sys.executable,
         str(worker_script),
@@ -161,15 +164,9 @@ def _run_one_query_with_retry_standalone(
 ) -> tuple[dict, float, list[str]]:
     """Run one query with retry, return (record, elapsed_s, log_lines).
 
-    Standalone equivalent of `EvalRunner._run_one_query_with_retry` minus
-    the `self` dependency, so this is picklable for ProcessPoolExecutor.
-    Retry log messages are accumulated in `log_lines` for the parent to
-    flush in combo order.
-
-    Args:
-        query_text_override: Alternative query text to send to the worker.
-            When None, ``item["query"]`` flows through unchanged. Used by
-            the --query-expansion flag to feed LLM-expanded queries.
+    Picklable for ProcessPoolExecutor. Retry log messages are accumulated
+    in log_lines for the parent to flush in combo order. When
+    query_text_override is not None it replaces item["query"].
     """
     retry_count = 0
     error_category = ""
@@ -229,19 +226,8 @@ def _execute_one_combo(
 ) -> dict:
     """Execute one (system, granularity) combo as a standalone unit.
 
-    Returns a dict with `records`, `elapsed_s`, `error_categories`,
-    accumulated `log_lines`, and `tick_lines`. Designed to be picklable
-    for parallel submission via ProcessPoolExecutor. Per-combo JSONL
-    writes happen inside this function, no cross-combo file contention
-    because each combo owns one JSONL filename.
-
-    Live stdout progress is emitted directly from here every
-    `progress_every` queries via `print(..., flush=True)`. When running
-    in parallel mode (`verbose_prefix=True`) each tick is prefixed with
-    `system x granularity` so interleaved output from multiple workers
-    stays identifiable. Each tick is also collected into `tick_lines`
-    so the parent can mirror it into progress.log without re-printing
-    to stdout.
+    Returns a dict with records, elapsed_s, error_categories, log_lines,
+    and tick_lines. Picklable for ProcessPoolExecutor.
     """
     combo_path = records_dir / eval_io.combo_filename(system, granularity)
     completed = (
@@ -270,10 +256,7 @@ def _execute_one_combo(
     new_records: list[dict] = []
 
     total_to_execute = sum(1 for qid, _ in selected_queries if qid not in completed)
-    # Adapt progress_every so resumes with small populations still emit ticks.
-    # Full runs (357 queries) keep the default PROGRESS_EVERY=25. A 22-query
-    # resume gets a tick every 5 queries, a 12-query resume every 3, and so on.
-    # Worst case the user still sees ~4 ticks across the combo plus the final.
+    # Adapt progress_every so small populations still emit ticks.
     effective_progress_every = (
         max(1, min(progress_every, total_to_execute // 4 or 1))
         if total_to_execute > 0 else progress_every
@@ -464,13 +447,7 @@ class EvalRunner:
         return {k: cfg.get(k) for k in keys}
 
     def _validate_resume_config(self, current: dict) -> None:
-        """Refuse to resume into a directory whose config disagrees with this run.
-
-        Mixed configs in one directory would corrupt the summary aggregation.
-        Compares only the structural fields (signature). The fingerprint of
-        the testset file is checked separately and surfaced as a warning so
-        users can decide whether GT churn is acceptable.
-        """
+        """Refuse to resume into a directory whose config disagrees with this run."""
         existing_path = self.run_dir / "config.json"
         if not existing_path.exists():
             return
@@ -496,8 +473,7 @@ class EvalRunner:
                 self.logger.warn(line)
             raise SystemExit(2)
 
-        # GT fingerprint drift is a warning, not an error. The user may have
-        # intentionally regenerated GT and wants to keep prior eval rows.
+        # GT fingerprint drift is a warning, not an error.
         old_fp = (existing.get("testset_fingerprint") or {}).get("sha256_16")
         new_fp = (current.get("testset_fingerprint") or {}).get("sha256_16")
         if old_fp and new_fp and old_fp != new_fp:
@@ -563,9 +539,9 @@ class EvalRunner:
 
         if any(sys in self.llm_systems for sys in self.systems):
             ok, msg = check_gemini_reachable(timeout_s=15.0)
-            self.logger.preflight_gemini(ok, msg)
+            self.logger.preflight_llm(ok, msg)
             if not ok and self.strict:
-                self.logger.warn("--strict set and Gemini unreachable, aborting.")
+                self.logger.warn("--strict set and retrieval LLM unreachable, aborting.")
                 raise SystemExit(2)
 
         if self.run_kind == "vector":
@@ -630,6 +606,7 @@ class EvalRunner:
     # ------------------------------------------------------------------
 
     def execute(self) -> None:
+        """Run all (system, granularity) combos, serially or in parallel."""
         combos = [(s, g) for s in self.systems for g in self.granularities]
         total_combos = len(combos)
 

@@ -1,22 +1,11 @@
 """Statistical significance tests for paired between-system comparison.
 
-Used for RQ3 head-to-head, given two systems evaluated on the same query
-set, decide whether the difference in their headline metric is real or
-random.
-
-Two tests are reported. Paired randomization is the primary, no normality
-assumption, recommended for IR by Smucker, Allan & Carterette (CIKM 2007).
-Paired t-test is the secondary, matches the conventional matkul-style
-expectation. When the two converge the conclusion is robust, when they
-diverge the randomization result is the trusted one because hit/miss is
-Bernoulli, not Gaussian.
-
-Effect size is Cohen's d for paired samples with Sawilowsky 2009 labels.
-P-values without effect size are easy to misread, both are reported.
+Two tests are reported. Paired randomization is the primary, with no
+normality assumption. Paired t-test is the secondary. Effect size is
+Cohen's d for paired samples.
 
 Pure Python plus optional scipy. The randomization test never needs scipy.
-The t-test prefers scipy.stats but falls back to a normal approximation
-that is acceptable for the thesis sample size (n >= 50).
+The t-test prefers scipy.stats but falls back to a normal approximation.
 """
 
 from __future__ import annotations
@@ -34,7 +23,7 @@ DEFAULT_SEED = 42
 
 
 # ----------------------------------------------------------------------
-# Paired randomization test (Smucker, Allan & Carterette CIKM 2007)
+# Paired randomization test
 # ----------------------------------------------------------------------
 
 def paired_randomization(
@@ -50,7 +39,7 @@ def paired_randomization(
     d_i is exchangeable, equivalent to "system labels are interchangeable".
     Resample sign assignments B times, recompute the mean each time, count
     how often the absolute permuted mean is at least as extreme as the
-    observed absolute mean. Add-one smoothing follows Phipson & Smyth (2010).
+    observed absolute mean.
     """
     if len(a) != len(b):
         raise ValueError(f"paired arrays must be same length, got {len(a)} and {len(b)}")
@@ -77,7 +66,7 @@ def paired_randomization(
         if abs(permuted_sum / n) >= abs_observed:
             extreme_count += 1
 
-    # Phipson & Smyth (2010) unbiased Monte Carlo p-value, never zero.
+    # Add-one smoothed p-value, never zero.
     p_value = (extreme_count + 1) / (B + 1)
     return {
         "method": "paired-randomization",
@@ -90,16 +79,11 @@ def paired_randomization(
 
 
 # ----------------------------------------------------------------------
-# Paired t-test (matkul-conventional secondary test)
+# Paired t-test (secondary test)
 # ----------------------------------------------------------------------
 
 def paired_t_test(a: list[float], b: list[float]) -> dict:
-    """Two-sided paired t-test on the mean of differences.
-
-    Reported alongside paired randomization as a sanity cross-check. For
-    binary hit/miss the normality assumption fails, so the randomization
-    result is the trusted one when the two diverge.
-    """
+    """Two-sided paired t-test on the mean of differences."""
     if len(a) != len(b):
         raise ValueError(f"paired arrays must be same length, got {len(a)} and {len(b)}")
     n = len(a)
@@ -154,7 +138,7 @@ def _normal_cdf(x: float) -> float:
 
 
 # ----------------------------------------------------------------------
-# Effect size, Cohen's d for paired samples + Sawilowsky 2009 label
+# Effect size, Cohen's d for paired samples
 # ----------------------------------------------------------------------
 
 def cohens_d_paired(a: list[float], b: list[float]) -> dict:
@@ -175,7 +159,7 @@ def cohens_d_paired(a: list[float], b: list[float]) -> dict:
 
 
 def sawilowsky_label(d: float) -> str:
-    """Sawilowsky (2009) descriptive label for Cohen's d magnitude."""
+    """Descriptive label for Cohen's d magnitude."""
     abs_d = abs(d)
     if abs_d < 0.01:
         return "trivial"

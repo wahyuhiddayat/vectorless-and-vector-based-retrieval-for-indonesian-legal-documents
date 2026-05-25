@@ -1,11 +1,8 @@
 """Pre-run sanity checks.
 
 Validates that the planned run is feasible before burning hours on it.
-  - every gold_doc_id in the testset has an index file at each granularity
-  - Gemini API is reachable (if any LLM-driven system is requested)
-  - Qdrant is reachable (if running the vector path)
-  - leaf-count invariant per doc, rincian >= ayat >= pasal
-  - GT provenance, fingerprint of the testset file for reproducibility
+Checks index coverage for every gold_doc_id, LLM and Qdrant reachability,
+the leaf-count invariant per doc, and GT provenance fingerprinting.
 """
 
 from __future__ import annotations
@@ -16,8 +13,6 @@ import time
 from collections import Counter
 from pathlib import Path
 
-# Import the authoritative category mapping from vectorless.ids.
-# Avoids drift from a second manual implementation.
 from vectorless.ids import doc_category
 
 
@@ -66,14 +61,13 @@ def check_llm_reachable(timeout_s: float = 10.0) -> tuple[bool, str]:
         return False, f"import failed: {exc}"
     try:
         t0 = time.time()
-        _ = llm_call('Reply with {"ok": true}', model=MODEL, max_completion_tokens=64, max_retries=1)
+        _ = llm_call('Reply with JSON: {"ok": true}', model=MODEL, max_completion_tokens=64, max_retries=1)
         elapsed_ms = int((time.time() - t0) * 1000)
         return True, f"{elapsed_ms}ms"
     except Exception as exc:
         return False, f"{type(exc).__name__}: {exc}"
 
 
-# Back-compat alias used by older callers.
 check_gemini_reachable = check_llm_reachable
 
 
@@ -86,7 +80,7 @@ def check_qdrant_reachable(
 
     Local mode, qdrant_path must point to an existing dir. Server mode,
     qdrant_url must respond to GET /collections within timeout_s. Returns
-    (ok, message) following the convention of check_gemini_reachable().
+    (ok, message).
     """
     if qdrant_path:
         path = Path(qdrant_path)
@@ -119,9 +113,7 @@ def check_corpus_consistency(
 ) -> dict[str, list[str]]:
     """For every doc in the testset, verify rincian >= ayat >= pasal leaves.
 
-    Catches partially re-split docs (the splitter ran on pasal but failed at
-    ayat, or skipped rincian). Returns {doc_id, [reasons...]} for offenders.
-    Empty dict when everything is consistent.
+    Returns {doc_id, [reasons...]} for offenders. Empty dict when consistent.
     """
     if "rincian" not in granularities or "ayat" not in granularities or "pasal" not in granularities:
         # Only a sub-set requested. Skip the cross-granularity invariant.
@@ -161,6 +153,7 @@ def _count_leaves(path: Path) -> int:
 
 
 def _walk_leaves(nodes: list[dict]) -> int:
+    """Recursively count leaf nodes that have text content."""
     total = 0
     for node in nodes:
         if node.get("nodes"):

@@ -171,11 +171,12 @@ class ProgressLogger:
         preview = missing[:10]
         self._emit("      " + ", ".join(preview) + ("  ..." if len(missing) > 10 else ""))
 
-    def preflight_gemini(self, ok: bool, message: str) -> None:
+    def preflight_llm(self, ok: bool, message: str) -> None:
+        """Log retrieval-LLM reachability check result."""
         if ok:
-            self.ok(f"Gemini API reachable ({message})")
+            self.ok(f"Retrieval LLM reachable ({message})")
         else:
-            self.warn(f"Gemini API check failed: {message}")
+            self.warn(f"Retrieval LLM check failed: {message}")
 
     def run_footer(
         self,

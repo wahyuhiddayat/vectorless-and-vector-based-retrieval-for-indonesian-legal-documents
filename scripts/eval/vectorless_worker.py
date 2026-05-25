@@ -1,8 +1,7 @@
-"""
-Subprocess worker for vectorless evaluation.
+"""Subprocess worker for vectorless evaluation.
 
-Runs exactly one vectorless retrieval call in a fresh Python process so the
-active DATA_INDEX granularity is isolated per invocation.
+Runs one vectorless retrieval call in a fresh process so the active
+DATA_INDEX granularity is isolated per invocation.
 
 Usage:
     python scripts/eval/vectorless_worker.py --system bm25-flat --granularity ayat --query "..."
@@ -33,10 +32,8 @@ GRANULARITY_TO_INDEX = {
 def run_retrieval(system: str, query: str, top_k: int) -> dict:
     """Dispatch to the requested retrieval module in this fresh subprocess.
 
-    The module-level `save_log = lambda _: None` patch disables the on-disk
-    retrieval log each module would normally write. We mute it so concurrent
-    eval combos do not race on the same log file. Real retrieval logs from
-    the eval harness live in records/<system>__<granularity>.jsonl instead.
+    Patches save_log to a no-op so concurrent eval workers do not race on
+    the same log file.
     """
     if system == "bm25-flat":
         from vectorless.retrieval.bm25 import flat as module
@@ -78,11 +75,6 @@ def run_retrieval(system: str, query: str, top_k: int) -> dict:
         from vectorless.retrieval.llm import flat as module
 
         module.save_log = lambda _result: None
-        # llm-flat now uses chunked listwise reranking (RankGPT-style,
-        # Sun et al. 2023 EMNLP) which handles any corpus size by
-        # processing chunks of `window_size` candidates per LLM call.
-        # No need to pass a sampling cap; the full corpus is ranked
-        # via tournament elimination across rounds.
         return module.retrieve(query, top_k=top_k, verbose=False)
 
     if system == "llm-agentic-doc":
@@ -104,6 +96,7 @@ def _llm_model_constant() -> str | None:
 
 
 def main() -> int:
+    """Parse args, run one retrieval call, print JSON result to stdout."""
     ap = argparse.ArgumentParser(description="Run one vectorless retrieval call in a fresh process.")
     ap.add_argument("--system", required=True, choices=[
         "bm25-flat", "bm25-tree",

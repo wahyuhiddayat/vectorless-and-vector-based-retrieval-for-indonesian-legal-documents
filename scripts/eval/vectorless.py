@@ -1,4 +1,4 @@
-﻿"""Vectorless evaluation harness.
+"""Vectorless evaluation harness.
 
 Evaluates current vectorless retrieval systems against
 data/validated_testset.pkl across pasal / ayat / rincian and writes
@@ -43,7 +43,6 @@ TESTSET_FILE = REPO_ROOT / "data/validated_testset.pkl"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data/eval_runs"
 WORKER_SCRIPT = REPO_ROOT / "scripts/eval/vectorless_worker.py"
 
-# RQ1 matrix per ADR Notes/06-decisions/vectorless-llm-retrieval.md.
 SYSTEMS = [
     "bm25-flat", "bm25-tree",
     "hybrid-flat", "hybrid-flat-rrf",
@@ -61,10 +60,7 @@ PROCESS_TIMEOUT_S = 900
 DEFAULT_MAX_RETRIES = 1
 DEFAULT_PARALLEL_COMBOS = 6
 
-# Per-system timeout caps (seconds). Justified by 7q run03 p95 timings.
-# Outlier queries (mis. q194 yang stuck 1263s di run03 pasal) sekarang
-# di-abort lebih cepat supaya tidak menggentungkan throughput eval.
-# CLI --worker-timeout-s tetap override semuanya.
+# Per-system timeout caps in seconds.
 PER_SYSTEM_TIMEOUT_S = {
     "bm25-flat": 30,
     "bm25-tree": 30,
@@ -72,16 +68,14 @@ PER_SYSTEM_TIMEOUT_S = {
     "hybrid-flat-rrf": 120,
     "hybrid-tree": 360,
     "hybrid-tree-rrf": 360,
-    # llm-flat: chunked tournament fan-out is large at rincian (213 calls
-    # at top-K survivor selection ~3-5s per call) so a single query can
-    # legitimately need 20-30 min wall time when run in parallel with
-    # other workers sharing API bandwidth. 2400s = 40 min headroom.
+    # llm-flat tournament fan-out is large, 2400s = 40 min headroom.
     "llm-flat": 2400,
     "llm-agentic-doc": 300,
 }
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser for the vectorless eval harness."""
     ap = argparse.ArgumentParser(description="Evaluate vectorless retrieval pipelines on validated GT.")
     ap.add_argument("--label", type=str, default=None,
                     help="Run folder name under data/eval_runs/. Required unless --self-test-metrics.")
@@ -128,6 +122,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    """CLI entrypoint for vectorless evaluation."""
     ap = build_arg_parser()
     args = ap.parse_args()
 
@@ -176,15 +171,13 @@ def main() -> int:
     eval_io.prepare_run_dir(run_dir, resume=args.resume, overwrite=args.overwrite)
 
     parallel_combos = max(1, args.parallel_combos)
-    # Scale inter-query sleep down when running parallel: total LLM RPM is
-    # already higher due to concurrent workers, so per-worker pacing can relax.
+    # Scale inter-query sleep down when running parallel.
     inter_query_delay_s = (
         LLM_INTER_QUERY_DELAY_S / parallel_combos
         if parallel_combos > 1 else LLM_INTER_QUERY_DELAY_S
     )
 
-    # Resolve per-system timeouts. CLI override wins; otherwise use the
-    # per-system caps justified by 7q empirical p95 timings.
+    # Resolve per-system timeouts. CLI override wins.
     if args.worker_timeout_s is not None:
         system_timeouts = {s: args.worker_timeout_s for s in systems}
         fallback_timeout = args.worker_timeout_s

@@ -1,48 +1,16 @@
 """Pure retrieval scoring functions.
 
 Zero I/O, zero side effects. Used by both the vectorless and vector eval
-harnesses so RQ1, RQ2, and RQ3 numbers are computed identically.
-
-Methodology notes for thesis writeup.
+harnesses so metrics are computed identically across paradigms.
 
   N1. Gold sets may have one or multiple members. Single-gold queries
-      (factual, paraphrased) collapse recall@k to hit@k and map@k to mrr@k.
-      Multi-gold queries (multihop) make recall@k a true partial-credit
-      metric. The score_ranked_retrieval formula handles both cases uniformly
-      via set-overlap. NDCG@k is monotone-equivalent to mrr@k under single-
-      gold (Sakai 2007, IPSJ Trans. Databases 48 SIG9).
-
-      Primary metric per BEIR convention. Thakur et al. 2021 (NeurIPS D&B,
-      arXiv:2104.08663) establish NDCG@10 as the standard headline metric for
-      modern IR benchmarks because it handles both binary and graded relevance
-      uniformly and is rank-aware. For a thesis Bab 4 narrative, lead with
-      NDCG@10 then report Recall@1/5/10 and MRR@10 as supporting metrics.
-      MAP@k is reported for completeness only.
-
-  N1b. Granularity reporting. Per Faisal et al. 2024 (IJAIN 10(3)) and the
-       construct-validity recommendation in our literature review, we report
-       metrics at all three granularities (pasal, ayat, rincian) so readers
-       can compare strict (rincian) versus lenient (ayat, pasal) outcomes for
-       the same query. The progression from coarse to fine IS the dual or
-       triple-granularity analysis, no extra metric column is needed.
-
-  N2. Retrieval may return fewer than k items (LLM-stepwise can stop early).
-      Metrics are computed over the actual list. Recall@k for a 3-item list
-      with the gold at rank 2 is hit. We do not pad to length k.
-
-  N3. full_reciprocal_rank ignores the cutoff. Useful when gold appears at
-      rank 12 with k=10, where mrr@10=0 hides the signal but the system
-      still found the answer. Report alongside mrr@10 for failure analysis.
+      collapse recall@k to hit@k and map@k to mrr@k. Multi-gold queries
+      make recall@k a true partial-credit metric.
 
   N4. sibling_hit@k is a diagnostic, not a headline metric. It fires when a
       retrieved node shares the immediate parent of the gold anchor but is
       not the gold itself. Useful to distinguish "right paragraph, wrong
       sub-clause" failures from "completely wrong article" failures.
-      Conceptually inspired by INEX near-miss evaluation (Kazai & Lalmas
-      2006, ACM TOIS 24(4)) and hierarchical classification's ancestor
-      partial-credit philosophy (Kiritchenko et al. 2006). The sibling-only
-      specialization is novel to this work and reported only in the failure
-      analysis section, never as a headline claim.
 """
 
 from __future__ import annotations
@@ -70,12 +38,14 @@ SLICE_FIELDS = ["reference_mode", "query_style", "gold_doc_id", "query_type"]
 # ----------------------------------------------------------------------
 
 def safe_mean(values: list[float]) -> float:
+    """Return the mean of values, or 0.0 if the list is empty."""
     if not values:
         return 0.0
     return float(sum(values) / len(values))
 
 
 def unique_preserve_order(values: list[str]) -> list[str]:
+    """Deduplicate a list of strings while preserving first-occurrence order."""
     seen: set[str] = set()
     output: list[str] = []
     for value in values:
@@ -130,13 +100,7 @@ def sibling_hit_at_k(
 
 
 def sibling_failure_stats(records: list[dict], cutoffs: list[int]) -> dict:
-    """For each cutoff, count failure cases and how many had a sibling near-miss.
-
-    A failure case is a non-error query with hit@k = 0. Of those, we report
-    how many had sibling_hit@k = 1 (parent right, child wrong). This lives
-    in the failure analysis section of summary_overall.json, not in headline
-    tables.
-    """
+    """Count failure cases per cutoff and how many had a sibling near-miss."""
     out: dict[str, dict] = {}
     for k in cutoffs:
         failures = [
@@ -169,9 +133,6 @@ def score_ranked_retrieval(
     """Score one ranked retrieval result against the gold set.
 
     Outputs cover every cutoff plus a few rank-distribution descriptive stats.
-    For single-gold GT (the thesis design) recall@k collapses to hit@k and
-    map@k collapses to mrr@k. We emit both names so reviewers from different
-    sub-fields can reference the metric they recognise.
     """
     ranked = unique_preserve_order(ranked_ids)
     relevant = set(relevant_ids)
@@ -183,8 +144,7 @@ def score_ranked_retrieval(
         "num_relevant": len(relevant),
         "first_relevant_rank": first_rank,
         "exact_top1_hit": bool(ranked) and ranked[0] in relevant,
-        # Reciprocal rank without a cutoff. Useful when gold lands beyond k
-        # (mrr@k = 0 hides the rank, full_rr keeps the signal).
+        # Reciprocal rank without a cutoff.
         "full_reciprocal_rank": (1.0 / first_rank) if first_rank else 0.0,
     }
 
@@ -213,8 +173,7 @@ def score_ranked_retrieval(
                 precision_sum += num_hits / rank
         ap = precision_sum / len(relevant) if relevant else 0.0
 
-        # Per-cutoff MRR. For single-gold GT this equals map@k, but both names
-        # appear in the literature so we keep both for completeness.
+        # Per-cutoff MRR.
         mrr_k = (1.0 / first_rank) if first_rank and first_rank <= k else 0.0
 
         out[f"hit@{k}"] = float(hit)
@@ -243,30 +202,10 @@ def compute_doc_pick_diagnostics(
 ) -> dict:
     """Attribute tree-method failures to stage-1 (doc-pick) versus stage-2.
 
-    For tree retrieval (bm25-tree, hybrid-tree, llm-agentic-doc), a failed
-    query can fail either because doc-pick missed the gold doc (stage-1
-    cascade fail) or because within-doc navigation missed the gold node
-    even after doc-pick was correct (stage-2 weakness). The 2026-05-13 pilot
-    could not distinguish these. These per-query fields make the next pilot
-    measurable.
-
-    Fields:
-        doc_pick_hit: 1.0 if any picked doc is in the gold doc set, else 0.0.
-        doc_pick_hit_count: number of picked docs that are in the gold set.
-        within_doc_hit@k, within_doc_recall@k, within_doc_mrr@k: standard
-            ranked-retrieval metrics computed on the subset of the retrieval
-            output whose source.doc_id is in the gold doc set. When the
-            picked docs miss the gold doc, the subset is empty and all values
-            are zero. The aggregator then masks these to compute the
-            oracle-conditional R@k by averaging only over rows where
-            doc_pick_hit == 1.0.
-
-    Flat methods that do not have an explicit stage-1 doc-pick (bm25-flat,
-    hybrid-flat, llm-flat) leave `picked_doc_ids` as []. For those rows the
-    diagnostic fields are still emitted but doc_pick_hit will always be 0
-    (vacuously) and within_doc metrics use the full ranked list filtered by
-    gold doc, which is semantically equivalent to recall@k restricted to
-    the gold doc and therefore still informative for flat-vs-tree analysis.
+    For tree retrieval, a failed query can fail either because doc-pick
+    missed the gold doc (stage-1) or because within-doc navigation missed
+    the gold node even after doc-pick was correct (stage-2). Emits
+    doc_pick_hit, doc_pick_hit_count, and within_doc_{hit,recall,mrr}@k.
     """
     gold_set = set(gold_doc_ids) if gold_doc_ids else set()
     picked = list(picked_doc_ids or [])
@@ -341,6 +280,7 @@ def rank_distribution_stats(records: list[dict]) -> dict:
 # ----------------------------------------------------------------------
 
 def run_self_test() -> None:
+    """Run built-in correctness checks for all scoring functions."""
     def assert_close(actual: float, expected: float, tol: float = 1e-6) -> None:
         if abs(actual - expected) > tol:
             raise AssertionError(f"expected {expected}, got {actual}")
