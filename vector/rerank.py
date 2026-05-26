@@ -8,6 +8,12 @@ pointwise backends via the sentence-transformers CrossEncoder API.
 from .common import _RERANKER_REGISTRY
 
 
+_QWEN_INSTRUCTION = (
+    "Given a legal question in Indonesian, retrieve relevant legal "
+    "document sections that answer the question"
+)
+
+
 _ce_model_cache: dict = {}
 
 
@@ -31,6 +37,38 @@ def _get_cross_encoder(model_id: str):
             ce = CrossEncoder(model_id)
         _ce_model_cache[model_id] = ce
     return _ce_model_cache[model_id]
+
+
+def _is_qwen_model(model_id: str) -> bool:
+    """Check whether a model ID refers to a Qwen reranker."""
+    return "qwen" in model_id.lower()
+
+
+def _format_qwen_pairs(query: str, candidates: list[dict]) -> list[list[str]]:
+    """Build prompt-formatted pairs for Qwen3-Reranker.
+
+    The seq-cls variant requires the full chat template with system,
+    user, and assistant blocks. Without this formatting the model
+    outputs near-uniform scores and reranking becomes random.
+    """
+    formatted_query = (
+        "<|im_start|>system\n"
+        "Judge whether the Document meets the requirements based on "
+        'the Query and the Instruct provided. Note that the answer '
+        'can only be "yes" or "no".<|im_end|>\n'
+        "<|im_start|>user\n"
+        f"<Instruct>: {_QWEN_INSTRUCTION}\n"
+        f"<Query>: {query}\n"
+    )
+    pairs = []
+    for c in candidates:
+        formatted_doc = (
+            f"<Document>: {c['text']}<|im_end|>\n"
+            "<|im_start|>assistant\n"
+            "<think>\n\n</think>\n\n"
+        )
+        pairs.append([formatted_query, formatted_doc])
+    return pairs
 
 
 def rerank(query: str, candidates: list[dict], reranker_name: str,
@@ -60,7 +98,10 @@ def rerank(query: str, candidates: list[dict], reranker_name: str,
 
     if cfg["backend"] == "cross_encoder":
         ce = _get_cross_encoder(cfg["model_id"])
-        pairs = [(query, c["text"]) for c in candidates]
+        if _is_qwen_model(cfg["model_id"]):
+            pairs = _format_qwen_pairs(query, candidates)
+        else:
+            pairs = [(query, c["text"]) for c in candidates]
         batch_size = cfg.get("predict_batch_size", 32)
         scores = ce.predict(pairs, batch_size=batch_size, show_progress_bar=False)
         scored = [(float(s), c) for s, c in zip(scores, candidates)]

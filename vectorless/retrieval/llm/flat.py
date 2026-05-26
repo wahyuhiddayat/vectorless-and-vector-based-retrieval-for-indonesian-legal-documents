@@ -1,23 +1,29 @@
-"""LLM flat retrieval via chunked elimination tournament.
+"""LLM flat retrieval via two-phase selection and ranking.
 
-Ranks all leaf nodes using listwise LLM calls in a multi-round
-elimination tournament. Each round shuffles the pool, splits it into
-chunks, and advances the top survivors per chunk. The final round
-ranks survivors twice with different shuffles and merges via Borda
-count. The LLM sees metadata only (title, summary, navigation_path),
-not full leaf text.
+Phase 1 compresses every leaf node in the corpus into a compact metadata
+line (ref, doc_title, navigation_path, truncated summary) and sends the
+entire list to the LLM in a single call, asking it to select the top-N
+most relevant candidates. If the corpus exceeds the context budget, it is
+split into the minimum number of chunks (typically 2 for rincian).
+
+Phase 2 loads full text for the survivors and ranks them in a single
+listwise LLM call, identical in structure to hybrid-flat's rerank stage.
+
+This two-phase design parallels hybrid-flat (BM25 filter + LLM rerank)
+but replaces BM25 with LLM-on-metadata as the first-stage filter. The
+comparison isolates whether LLM semantic reasoning over summaries is a
+better flat-corpus filter than BM25 keyword matching over full text.
 
 Usage:
     python -m vectorless.retrieval.llm.flat "Apa syarat penyadapan?"
-    python -m vectorless.retrieval.llm.flat "Apa syarat penyadapan?" --window_size 200
+    python -m vectorless.retrieval.llm.flat "Apa syarat penyadapan?" --phase1_survivors 50
 """
 
 import argparse
 import hashlib
 import json
-import random
+import math
 import time
-from collections import defaultdict
 
 from ...llm import call as llm_call, reset_counters, get_stats, snapshot_counters, step_metrics
 from ..common import (
@@ -25,8 +31,10 @@ from ..common import (
 )
 
 
-LISTWISE_WINDOW = 400      # candidates per LLM ranking call
-LISTWISE_SURVIVORS = 20    # top-K kept from each chunk to advance to next round
+SUMMARY_TRUNCATE = 100
+PHASE1_SURVIVORS = 50
+CONTEXT_BUDGET = 900_000
+TOKENS_PER_CANDIDATE = 120
 
 
 def _query_seed(query: str) -> int:
@@ -34,231 +42,219 @@ def _query_seed(query: str) -> int:
     return int(hashlib.md5(query.encode("utf-8")).hexdigest()[:8], 16)
 
 
-def _borda_merge(ranking_a: list[str], ranking_b: list[str], top_k: int) -> list[str]:
-    """Merge two ranked id lists via Borda count, return top-k.
+def _compress_leaf(leaf: dict) -> str:
+    """Build a compact one-line representation of a leaf for Phase 1.
 
-    Each id gets points equal to (list_len - position) in each ranking.
-    Ids missing from a ranking get zero points from that ranking. Ties
-    broken by first appearance in ranking_a for determinism.
+    Format: ref | doc_title | navigation_path | summary (truncated).
+    Approximately 30 tokens per leaf.
     """
-    scores: dict[str, int] = defaultdict(int)
-    order_a: dict[str, int] = {}
-    for i, nid in enumerate(ranking_a):
-        scores[nid] += len(ranking_a) - i
-        order_a.setdefault(nid, i)
-    for i, nid in enumerate(ranking_b):
-        scores[nid] += len(ranking_b) - i
-    ordered = sorted(scores.keys(),
-                     key=lambda x: (-scores[x], order_a.get(x, len(ranking_a))))
-    return ordered[:top_k]
+    ref = f"{leaf['doc_id']}/{leaf['node_id']}"
+    doc_title = leaf.get("doc_title", "")
+    path = leaf.get("navigation_path", "")
+    summary = (leaf.get("summary") or "")[:SUMMARY_TRUNCATE]
+    return f"{ref} | {doc_title} | {path} | {summary}"
 
 
-def _build_rank_prompt(query: str, candidates: list[dict], top_k: int) -> str:
-    """Build the top-K selection prompt for one chunk of candidates.
+def _build_phase1_prompt(query: str, compressed_lines: list[str],
+                         survivors: int) -> tuple[str, str]:
+    """Build system and user messages for Phase 1 selection.
 
-    Candidates are identified by compound refs (doc_id/node_id). The
-    prompt asks for a short top-K list only, not a full ranking.
+    Returns (system, prompt). System contains the candidate list (cached
+    by DeepSeek across queries since the corpus is the same for all queries
+    at one granularity). User contains the query (unique per call).
+    """
+    n = len(compressed_lines)
+    candidates_block = "\n".join(
+        f"{i+1}. {line}" for i, line in enumerate(compressed_lines)
+    )
 
-    Args:
-        query: Legal question in Indonesian.
-        candidates: Candidate dicts with ref and metadata fields.
-        top_k: Number of top candidates the LLM should select.
+    system = f"""\
+Kamu diberi daftar {n} Pasal dari berbagai Undang-Undang Indonesia.
+Setiap baris berformat: ref | judul_UU | lokasi | ringkasan.
 
-    Returns:
-        Formatted prompt string.
+Daftar Pasal:
+{candidates_block}
+
+Aturan:
+- Setiap ref HARUS sama persis dengan yang ada di input (format "doc_id/node_id")
+- Tidak boleh ada duplikat
+- Urutkan dari paling relevan ke kurang relevan
+- Kembalikan HANYA JSON"""
+
+    prompt = f"""\
+Pertanyaan: {query}
+
+Pilih {survivors} Pasal PALING RELEVAN untuk menjawab pertanyaan di atas (atau kurang jika tidak ada {survivors} yang relevan).
+
+Balas dengan JSON:
+{{"top": ["ref_paling_relevan", "ref_kedua", "..."]}}
+"""
+    return system, prompt
+
+
+def _phase1_select(query: str, leaves: list[dict],
+                   survivors: int = PHASE1_SURVIVORS,
+                   verbose: bool = True) -> list[dict]:
+    """Phase 1: select top candidates from the entire corpus using compressed metadata.
+
+    If the corpus exceeds CONTEXT_BUDGET tokens, it is split into the
+    minimum number of fixed chunks. Chunk composition is deterministic
+    and query-independent (sequential split by leaf index) so DeepSeek
+    prefix-caches each chunk's system message across all 357 queries at
+    the same granularity.
+    """
+    compressed = [_compress_leaf(leaf) for leaf in leaves]
+    total_tokens = len(leaves) * TOKENS_PER_CANDIDATE
+
+    n_chunks = max(1, math.ceil(total_tokens / CONTEXT_BUDGET))
+
+    if verbose:
+        print(f"\n[LLM Flat Phase 1] {len(leaves)} leaves, "
+              f"~{total_tokens:,} tokens, {n_chunks} chunk(s)")
+
+    if n_chunks == 1:
+        system, prompt = _build_phase1_prompt(query, compressed, survivors)
+        result = llm_call(prompt, system=system, max_completion_tokens=4096)
+        raw_top = result.get("top", []) if isinstance(result, dict) else []
+        if not raw_top and isinstance(result, dict):
+            raw_top = result.get("ranking", []) or []
+    else:
+        chunk_size = math.ceil(len(leaves) / n_chunks)
+        raw_top = []
+        for ci in range(n_chunks):
+            start = ci * chunk_size
+            end = min(start + chunk_size, len(leaves))
+            chunk_compressed = compressed[start:end]
+            system, prompt = _build_phase1_prompt(
+                query, chunk_compressed, survivors
+            )
+            result = llm_call(prompt, system=system, max_completion_tokens=4096)
+            chunk_top = result.get("top", []) if isinstance(result, dict) else []
+            if not chunk_top and isinstance(result, dict):
+                chunk_top = result.get("ranking", []) or []
+            raw_top.extend(chunk_top)
+            if verbose:
+                print(f"  Chunk {ci+1}/{n_chunks}: "
+                      f"{len(chunk_compressed)} candidates, "
+                      f"selected {len(chunk_top)}")
+
+    leaf_by_ref = {f"{l['doc_id']}/{l['node_id']}": l for l in leaves}
+    valid_refs = set(leaf_by_ref.keys())
+    seen: set[str] = set()
+    selected: list[dict] = []
+    for ref in raw_top:
+        if isinstance(ref, str) and ref in valid_refs and ref not in seen:
+            selected.append(leaf_by_ref[ref])
+            seen.add(ref)
+            if len(selected) >= survivors * n_chunks:
+                break
+
+    if verbose:
+        print(f"  Selected {len(selected)} survivors for Phase 2")
+
+    return selected
+
+
+def _build_phase2_prompt(query: str, candidates: list[dict]) -> tuple[str, str]:
+    """Build system and user messages for Phase 2 full-text ranking.
+
+    Same structure as hybrid-flat's llm_rerank but with selection_rank
+    instead of bm25_rank.
     """
     n = len(candidates)
-    candidates_text = json.dumps(candidates, ensure_ascii=False, indent=2)
-    return f"""\
-Kamu diberi pertanyaan hukum dan {n} Pasal kandidat dari berbagai Undang-Undang Indonesia.
-Setiap kandidat memiliki ringkasan isi (summary) dan lokasi dalam dokumen.
-Setiap kandidat punya field "ref" berformat "doc_id/node_id" yang UNIK (gunakan ref
-ini di jawaban karena node_id sendiri bisa sama antar dokumen).
+    candidates_for_prompt = []
+    for idx, c in enumerate(candidates):
+        ref = f"{c['doc_id']}/{c['node_id']}"
+        entry = {
+            "selection_rank": idx + 1,
+            "ref": ref,
+            "doc_id": c["doc_id"],
+            "doc_title": c.get("doc_title", ""),
+            "title": c.get("title", ""),
+            "navigation_path": c.get("navigation_path", ""),
+            "text": c.get("text") or "",
+        }
+        penjelasan = c.get("penjelasan")
+        if penjelasan and penjelasan != "Cukup jelas.":
+            entry["penjelasan"] = penjelasan
+        candidates_for_prompt.append(entry)
+
+    candidates_text = json.dumps(candidates_for_prompt, ensure_ascii=False, indent=2)
+
+    system = f"""\
+Kamu diberi pertanyaan hukum dan {n} Pasal kandidat dari berbagai Undang-Undang.
+Setiap kandidat memiliki ref (format "doc_id/node_id"), isi teks lengkap (text),
+penjelasan resmi (jika ada), dan selection_rank (peringkat dari tahap seleksi awal).
+
+Tugas: Urutkan SELURUH {n} kandidat dari paling relevan ke paling tidak relevan
+untuk menjawab pertanyaan.
 
 Pertanyaan: {query}
 
-Daftar Pasal kandidat:
+Aturan:
+- "ranking" HARUS berisi tepat {n} ref
+- Tidak boleh ada duplikat
+- Setiap ref harus muncul di input (tidak boleh hallucinate)
+- Urutan menentukan ranking (index 0 = paling relevan)
+- Pertimbangkan isi text, penjelasan, doc_title, navigation_path, dan selection_rank
+- Kembalikan HANYA JSON"""
+
+    prompt = f"""\
+Kandidat Pasal:
 {candidates_text}
 
-Tugas: Pilih {top_k} Pasal PALING RELEVAN dari {n} kandidat di atas untuk menjawab
-pertanyaan. Urutkan dari paling relevan ke kurang relevan.
-
-Balas HANYA dengan JSON berikut, tanpa penjelasan atau teks lain:
-{{"top": ["doc_id_1/node_id_paling_relevan", "doc_id_2/node_id_kedua", "...", "doc_id_N/node_id_ke_{top_k}"]}}
-
-Aturan ketat:
-- "top" HARUS berisi tepat {top_k} string ref (atau lebih sedikit kalau {n} < {top_k})
-- Setiap nilai HARUS sama persis dengan field "ref" salah satu kandidat di input
-  (format "doc_id/node_id", contoh "uu-3-2024/pasal_5")
-- Tidak boleh ada duplikat
-- JANGAN buat ref baru atau modifikasi format (no hallucination)
-- Urutan menentukan ranking (index 0 = paling relevan)
-- Pertimbangkan ISI summary, sumber UU (doc_title), dan navigation_path
-- JANGAN tambahkan field lain (tidak boleh "thinking", "reasoning", "ranking" full, dll)
-- Kembalikan HANYA satu objek JSON dengan field "top" saja
+Balas dalam format JSON:
+{{"ranking": ["ref_paling_relevan", "ref_kedua", "..."]}}
 """
+    return system, prompt
 
 
-def _select_top_from_chunk(query: str, chunk: list[dict], top_k: int) -> list[dict]:
-    """Ask the LLM to pick the top candidates from one chunk.
+def _phase2_rank(query: str, survivors: list[dict],
+                 top_k: int = 10,
+                 verbose: bool = True) -> tuple[list[str], dict]:
+    """Phase 2: rank survivors on full text and return top-k refs.
 
-    Each candidate is identified by a compound ref (doc_id/node_id).
-    Invalid or missing refs are padded with input order so downstream
-    slicing is stable.
-
-    Args:
-        query: Legal question in Indonesian.
-        chunk: List of leaf node dicts for this chunk.
-        top_k: Number of top candidates to select.
-
-    Returns:
-        Reordered list of leaf dicts, best first.
+    Returns (ranked_refs, rerank_result_dict).
     """
-    candidates_for_prompt = [
-        {
-            "ref": f"{leaf['doc_id']}/{leaf['node_id']}",
-            "doc_id": leaf["doc_id"],
-            "doc_title": leaf["doc_title"],
-            "node_id": leaf["node_id"],
-            "title": leaf.get("title", ""),
-            "navigation_path": leaf.get("navigation_path", ""),
-            "summary": leaf.get("summary", ""),
-        }
-        for leaf in chunk
+    if not survivors:
+        return [], {}
+
+    system, prompt = _build_phase2_prompt(query, survivors)
+    rerank_result = llm_call(prompt, system=system)
+
+    raw_ranking = rerank_result.get("ranking", [])
+    valid_refs = {f"{c['doc_id']}/{c['node_id']}" for c in survivors}
+    n_hallucinated = sum(1 for r in raw_ranking if r not in valid_refs)
+
+    pseudo_candidates = [
+        {"node_id": f"{c['doc_id']}/{c['node_id']}"} for c in survivors
     ]
+    ranked_refs = validate_llm_ranking(raw_ranking, pseudo_candidates)
 
-    prompt = _build_rank_prompt(query, candidates_for_prompt, top_k)
-    result = llm_call(prompt, max_completion_tokens=4096)
-
-    raw_top = result.get("top", []) if isinstance(result, dict) else []
-    if not raw_top and isinstance(result, dict):
-        raw_top = result.get("ranking", []) or []
-
-    valid_refs = {c["ref"] for c in candidates_for_prompt}
-    seen: set[str] = set()
-    cleaned_refs: list[str] = []
-    for ref in raw_top:
-        if isinstance(ref, str) and ref in valid_refs and ref not in seen:
-            cleaned_refs.append(ref)
-            seen.add(ref)
-    # Pad with input order so downstream slice [:survivors] is stable.
-    for c in candidates_for_prompt:
-        if c["ref"] not in seen:
-            cleaned_refs.append(c["ref"])
-            seen.add(c["ref"])
-
-    leaf_by_ref = {f"{leaf['doc_id']}/{leaf['node_id']}": leaf for leaf in chunk}
-    return [leaf_by_ref[ref] for ref in cleaned_refs if ref in leaf_by_ref]
-
-
-def flat_search(query: str, leaves: list[dict],
-                window_size: int = LISTWISE_WINDOW,
-                survivors_per_chunk: int = LISTWISE_SURVIVORS,
-                top_k: int = 10, verbose: bool = True) -> dict:
-    """Run a multi-round elimination tournament over all leaf nodes.
-
-    Each round shuffles the pool, splits into chunks of window_size,
-    and advances the top survivors_per_chunk from each chunk. The final
-    round ranks survivors twice with different shuffles and merges via
-    Borda count.
-
-    Args:
-        query: Legal question in Indonesian.
-        leaves: All leaf nodes from all documents.
-        window_size: Maximum candidates per LLM call.
-        survivors_per_chunk: Number of candidates kept per chunk per round.
-        top_k: Final number of leaves to return.
-        verbose: Print progress per round.
-
-    Returns:
-        Dict with ranked_node_ids, candidates_shown, rounds info,
-        and total_llm_calls.
-    """
-    candidates = list(leaves)
-    rounds_info: list[dict] = []
-    total_calls = 0
-    rng = random.Random(_query_seed(query))
+    rerank_result["validated_ranking"] = ranked_refs
+    rerank_result["llm_ranking_length"] = len(raw_ranking)
+    rerank_result["validated_ranking_length"] = len(ranked_refs)
+    rerank_result["n_hallucinated"] = n_hallucinated
 
     if verbose:
-        print(f"\n[LLM Flat] Starting with {len(candidates)} leaves")
+        print(f"\n[LLM Flat Phase 2] Ranked {len(ranked_refs)} candidates")
+        if rerank_result.get("thinking"):
+            print(f"  Reasoning: {rerank_result['thinking'][:200]}")
 
-    while len(candidates) > window_size:
-        rng.shuffle(candidates)
-        chunks = [candidates[i:i + window_size]
-                  for i in range(0, len(candidates), window_size)]
-        new_candidates: list[dict] = []
-        for chunk in chunks:
-            picked = _select_top_from_chunk(query, chunk, top_k=survivors_per_chunk)
-            new_candidates.extend(picked[:survivors_per_chunk])
-            total_calls += 1
-
-        rounds_info.append({
-            "round": len(rounds_info) + 1,
-            "chunks": len(chunks),
-            "input_size": sum(len(c) for c in chunks),
-            "survivors": len(new_candidates),
-            "calls": len(chunks),
-        })
-        if verbose:
-            print(f"  Round {len(rounds_info)}: "
-                  f"{len(chunks)} chunks of {window_size} -> "
-                  f"{len(new_candidates)} survivors")
-
-        candidates = new_candidates
-
-    if len(candidates) > 1:
-        pool_a = list(candidates)
-        rng.shuffle(pool_a)
-        picked_a = _select_top_from_chunk(query, pool_a, top_k=top_k)
-        total_calls += 1
-
-        pool_b = list(candidates)
-        rng.shuffle(pool_b)
-        picked_b = _select_top_from_chunk(query, pool_b, top_k=top_k)
-        total_calls += 1
-
-        refs_a = [f"{leaf['doc_id']}/{leaf['node_id']}" for leaf in picked_a]
-        refs_b = [f"{leaf['doc_id']}/{leaf['node_id']}" for leaf in picked_b]
-        merged_refs = _borda_merge(refs_a, refs_b, top_k=top_k)
-        leaf_by_ref = {f"{leaf['doc_id']}/{leaf['node_id']}": leaf for leaf in candidates}
-        candidates = [leaf_by_ref[ref] for ref in merged_refs if ref in leaf_by_ref]
-
-        rounds_info.append({
-            "round": len(rounds_info) + 1,
-            "chunks": 2,
-            "input_size": len(pool_a),
-            "survivors": len(candidates),
-            "calls": 2,
-            "final": True,
-            "merge": "borda",
-        })
-        if verbose:
-            print(f"  Final round: 2 shuffled passes over {len(pool_a)} "
-                  f"candidates -> Borda merge top-{top_k}")
-
-    final = candidates[:top_k]
-
-    return {
-        "ranked_node_ids": [leaf["node_id"] for leaf in final],
-        "candidates_shown": len(leaves),
-        "validated_ranking_length": len(final),
-        "rounds": rounds_info,
-        "total_llm_calls": total_calls,
-    }
+    return ranked_refs[:top_k], rerank_result
 
 
-def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
-             survivors_per_chunk: int = LISTWISE_SURVIVORS,
+def retrieve(query: str,
+             phase1_survivors: int = PHASE1_SURVIVORS,
              top_k: int = 10, verbose: bool = True) -> dict:
-    """Run the full LLM flat retrieval pipeline.
+    """Run the full two-phase LLM flat retrieval pipeline.
 
-    Loads all leaf nodes and ranks them through a chunked elimination
-    tournament.
+    Phase 1 selects candidates from compressed metadata of the entire
+    corpus. Phase 2 ranks survivors on full text.
 
     Args:
         query: Legal question in Indonesian.
-        window_size: Maximum candidates per LLM call.
-        survivors_per_chunk: Number of candidates kept per chunk per round.
+        phase1_survivors: Number of candidates to advance from Phase 1.
         top_k: Final number of leaves to return.
         verbose: Print progress to stdout.
 
@@ -273,8 +269,7 @@ def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
         print(f"{'=' * 60}")
         print(f"Query: {query}")
         print(f"Strategy: llm-flat "
-              f"(window_size={window_size}, survivors={survivors_per_chunk}, "
-              f"top_k={top_k})")
+              f"(phase1_survivors={phase1_survivors}, top_k={top_k})")
         print(f"{'=' * 60}")
 
     snap = snapshot_counters()
@@ -284,23 +279,29 @@ def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
     if verbose:
         print(f"\nCorpus: {len(leaves)} leaf nodes from all documents")
 
-    search_result = flat_search(query, leaves,
-                                window_size=window_size,
-                                survivors_per_chunk=survivors_per_chunk,
-                                top_k=top_k, verbose=verbose)
-    ranked_ids = search_result.get("ranked_node_ids", [])
-    steps["flat_search"] = step_metrics(t_step, snap)
+    survivors = _phase1_select(query, leaves,
+                               survivors=phase1_survivors,
+                               verbose=verbose)
+    steps["phase1_select"] = step_metrics(t_step, snap)
 
-    if not ranked_ids:
+    if not survivors:
         return {"query": query, "strategy": "llm-flat",
-                "error": "LLM returned no ranking"}
+                "error": "Phase 1 returned no candidates"}
 
-    leaf_map = {leaf["node_id"]: leaf for leaf in leaves}
-    ranked_results = [leaf_map[nid] for nid in ranked_ids if nid in leaf_map]
+    snap = snapshot_counters()
+    t_step = time.time()
 
-    if not ranked_results:
+    ranked_refs, rerank_result = _phase2_rank(
+        query, survivors, top_k=top_k, verbose=verbose
+    )
+    steps["phase2_rank"] = step_metrics(t_step, snap)
+
+    if not ranked_refs:
         return {"query": query, "strategy": "llm-flat",
-                "node_ids": ranked_ids, "error": "Ranked nodes not found in corpus"}
+                "error": "Phase 2 returned no ranking"}
+
+    survivor_map = {f"{s['doc_id']}/{s['node_id']}": s for s in survivors}
+    ranked_results = [survivor_map[r] for r in ranked_refs if r in survivor_map]
 
     sources = []
     for pos, r in enumerate(ranked_results):
@@ -319,7 +320,8 @@ def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
         "query": query,
         "strategy": "llm-flat",
         "corpus_size": len(leaves),
-        "flat_search": search_result,
+        "phase1_survivors": len(survivors),
+        "phase2_rerank": rerank_result,
         "sources": sources,
         "metrics": {**stats, "elapsed_s": round(elapsed, 2), "step_metrics": steps},
     }
@@ -330,6 +332,9 @@ def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
         print(f"\n{'=' * 60}")
         print(f"Done in {elapsed:.1f}s  |  {stats['llm_calls']} LLM calls  |  "
               f"{stats['total_tokens']:,} tokens")
+        for step_name, sm in steps.items():
+            print(f"  {step_name}: {sm['elapsed_s']:.1f}s, {sm['llm_calls']} calls, "
+                  f"{sm['input_tokens']+sm['output_tokens']:,} tokens")
         print(f"{'=' * 60}")
 
     return result
@@ -338,19 +343,16 @@ def retrieve(query: str, window_size: int = LISTWISE_WINDOW,
 def main():
     """CLI entry point for LLM flat retrieval."""
     ap = argparse.ArgumentParser(
-        description="LLM flat (chunked listwise) retrieval for Indonesian legal QA")
+        description="LLM flat (two-phase selection + ranking) retrieval for Indonesian legal QA")
     ap.add_argument("query", help="Legal question in Indonesian")
-    ap.add_argument("--window_size", type=int, default=LISTWISE_WINDOW,
-                    help=f"Max candidates per LLM call (default: {LISTWISE_WINDOW})")
-    ap.add_argument("--survivors_per_chunk", type=int, default=LISTWISE_SURVIVORS,
-                    help=f"Top-K kept per chunk per round (default: {LISTWISE_SURVIVORS})")
+    ap.add_argument("--phase1_survivors", type=int, default=PHASE1_SURVIVORS,
+                    help=f"Candidates advanced from Phase 1 (default: {PHASE1_SURVIVORS})")
     ap.add_argument("--top_k", type=int, default=10,
                     help="Number of final results to return (default: 10)")
     args = ap.parse_args()
 
     result = retrieve(args.query,
-                      window_size=args.window_size,
-                      survivors_per_chunk=args.survivors_per_chunk,
+                      phase1_survivors=args.phase1_survivors,
                       top_k=args.top_k)
     print(f"\n{'-' * 60}")
     print(f"DASAR HUKUM:")
