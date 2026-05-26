@@ -165,7 +165,7 @@ def extract_nodes(doc: dict, node_ids: list[str]) -> list[dict]:
     return out
 
 
-def agentic_finalize(submitted_ids: list[str],
+def tree_finalize(submitted_ids: list[str],
                      top_k: int) -> tuple[list[str], list[str]]:
     """Deduplicate and truncate the agent's submitted ids to top_k.
 

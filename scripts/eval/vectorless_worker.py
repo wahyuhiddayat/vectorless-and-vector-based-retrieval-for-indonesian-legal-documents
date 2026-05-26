@@ -77,8 +77,8 @@ def run_retrieval(system: str, query: str, top_k: int) -> dict:
         module.save_log = lambda _result: None
         return module.retrieve(query, top_k=top_k, verbose=False)
 
-    if system == "llm-agentic-doc":
-        from vectorless.retrieval.llm import agentic as module
+    if system == "llm-tree":
+        from vectorless.retrieval.llm import tree as module
 
         module.save_log = lambda _result: None
         return module.retrieve(query, verbose=False)
@@ -102,7 +102,7 @@ def main() -> int:
         "bm25-flat", "bm25-tree",
         "hybrid-flat", "hybrid-flat-rrf",
         "hybrid-tree", "hybrid-tree-rrf",
-        "llm-flat", "llm-agentic-doc",
+        "llm-flat", "llm-tree",
     ])
     ap.add_argument("--granularity", required=True, choices=["pasal", "ayat", "rincian"])
     ap.add_argument("--query", required=True)

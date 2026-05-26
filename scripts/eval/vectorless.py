@@ -47,13 +47,13 @@ SYSTEMS = [
     "bm25-flat", "bm25-tree",
     "hybrid-flat", "hybrid-flat-rrf",
     "hybrid-tree", "hybrid-tree-rrf",
-    "llm-flat", "llm-agentic-doc",
+    "llm-flat", "llm-tree",
 ]
 GRANULARITIES = ["pasal", "ayat", "rincian"]
 LLM_SYSTEMS = {
     "hybrid-flat", "hybrid-flat-rrf",
     "hybrid-tree", "hybrid-tree-rrf",
-    "llm-flat", "llm-agentic-doc",
+    "llm-flat", "llm-tree",
 }
 LLM_INTER_QUERY_DELAY_S = 3.0
 PROCESS_TIMEOUT_S = 900
@@ -70,7 +70,7 @@ PER_SYSTEM_TIMEOUT_S = {
     "hybrid-tree-rrf": 360,
     # llm-flat tournament fan-out is large, 2400s = 40 min headroom.
     "llm-flat": 2400,
-    "llm-agentic-doc": 300,
+    "llm-tree": 300,
 }
 
 

@@ -1,13 +1,13 @@
-"""Agentic LLM retrieval for Indonesian legal QA.
+"""LLM tree retrieval for Indonesian legal QA.
 
 The LLM acts as an agent that navigates the document tree using
 expand(), read(), and submit() tools. The full tree outline (titles
 and summaries) is shown upfront. Documents are selected first via
 LLM doc search, then the agent explores the picked documents to
-find relevant leaf nodes.
+find relevant leaf nodes. Inspired by PageIndex (Vectify AI, 2024).
 
 Usage:
-    python -m vectorless.retrieval.llm.agentic "Apa syarat penyadapan?"
+    python -m vectorless.retrieval.llm.tree "Apa syarat penyadapan?"
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from rank_bm25 import BM25Okapi
 from ...llm import call as llm_call, reset_counters, get_stats, snapshot_counters, step_metrics
 from ..common import (
     load_catalog, load_doc, find_node, save_log,
-    agentic_finalize, tokenize,
+    tree_finalize, tokenize,
     doc_corpus_string, catalog_for_llm_prompt,
     DOC_PICK_TOP_K,
 )
@@ -432,7 +432,7 @@ def retrieve(query: str,
              max_actions: int = MAX_ACTIONS, max_reads: int = MAX_READS,
              top_k: int = DEFAULT_TOP_K, top_k_docs: int = DOC_PICK_TOP_K,
              verbose: bool = True) -> dict:
-    """Run the full agentic LLM retrieval pipeline.
+    """Run the full LLM tree retrieval pipeline.
 
     Selects documents via LLM doc search, then runs an agent loop
     where the LLM explores document trees using expand, read, and
@@ -458,7 +458,7 @@ def retrieve(query: str,
     if verbose:
         print("=" * 60)
         print(f"Query: {query}")
-        print(f"Strategy: llm-agentic-doc (top_k_docs={top_k_docs}, "
+        print(f"Strategy: llm-tree (top_k_docs={top_k_docs}, "
               f"max_actions={max_actions}, max_reads={max_reads})")
         print("=" * 60)
 
@@ -482,7 +482,7 @@ def retrieve(query: str,
     if not doc_ids:
         return {
             "query": query,
-            "strategy": "llm-agentic-doc",
+            "strategy": "llm-tree",
             "picked_doc_ids": [],
             "doc_search": doc_result,
             "error": "No relevant documents found",
@@ -643,7 +643,7 @@ def retrieve(query: str,
 
     submitted_refs = [f"{s['doc_id']}/{s['node_id']}" for s in selected]
 
-    final_refs, slot_labels = agentic_finalize(
+    final_refs, slot_labels = tree_finalize(
         submitted_ids=submitted_refs,
         top_k=top_k,
     )
@@ -651,7 +651,7 @@ def retrieve(query: str,
     if not final_refs:
         return {
             "query": query,
-            "strategy": "llm-agentic-doc",
+            "strategy": "llm-tree",
             "picked_doc_ids": doc_ids,
             "doc_search": doc_result,
             "agent": {
@@ -694,7 +694,7 @@ def retrieve(query: str,
 
     result = {
         "query": query,
-        "strategy": "llm-agentic-doc",
+        "strategy": "llm-tree",
         "picked_doc_ids": doc_ids,
         "doc_search": doc_result,
         "agent": {
@@ -722,8 +722,8 @@ def retrieve(query: str,
 
 
 def main() -> None:
-    """CLI entry point for the agentic retrieval module."""
-    ap = argparse.ArgumentParser(description="Agentic LLM retrieval for Indonesian legal QA")
+    """CLI entry point for the LLM tree retrieval module."""
+    ap = argparse.ArgumentParser(description="LLM tree retrieval for Indonesian legal QA")
     ap.add_argument("query", help="Legal question in Indonesian")
     ap.add_argument("--max-actions", type=int, default=MAX_ACTIONS,
                     help=f"Hard cap on agent steps (default {MAX_ACTIONS})")
