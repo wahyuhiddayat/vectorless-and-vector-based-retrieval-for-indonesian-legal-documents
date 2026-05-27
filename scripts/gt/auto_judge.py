@@ -51,9 +51,9 @@ DEFAULT_MAX_COST = 1.00
 DEFAULT_TEMPERATURE = 0.0
 DEFAULT_SEED = 42
 
-PROVIDER_DEFAULTS = {
-    "openai":    {"model": "gpt-5"},
-    "anthropic": {"model": "claude-sonnet-4-6"},
+DEFAULT_MODEL_BY_PROVIDER = {
+    "openai": "gpt-5",
+    "anthropic": "claude-sonnet-4-6",
 }
 
 # Default judge provider is OpenAI gpt-5 because the GT annotator defaults to
@@ -262,7 +262,7 @@ def main() -> None:
         ap.error("--doc-id requires --type")
 
     if not args.model:
-        args.model = PROVIDER_DEFAULTS[args.provider]["model"]
+        args.model = DEFAULT_MODEL_BY_PROVIDER[args.provider]
 
     if not ALLOCATION_FILE.exists():
         raise SystemExit(f"{ALLOCATION_FILE} not found")
