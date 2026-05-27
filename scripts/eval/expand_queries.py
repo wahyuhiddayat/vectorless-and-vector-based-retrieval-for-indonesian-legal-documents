@@ -17,7 +17,7 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -115,7 +115,7 @@ def main() -> int:
             "model": args.model,
             "prompt_version": PROMPT_VERSION,
             "split_fingerprint": split_fingerprint(args.split),
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "total_input_tokens": total_in_tok,
             "total_output_tokens": total_out_tok,
         },
