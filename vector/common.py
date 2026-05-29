@@ -17,7 +17,8 @@ GRANULARITY = os.environ.get("VECTOR_GRANULARITY", "pasal")
 RERANKER = os.environ.get("VECTOR_RERANKER", "none")
 LOG_DIR = Path("data/retrieval_logs")
 
-RERANKER_TOP_N = 50  # first-stage candidates fed to the reranker
+RERANKER_TOP_N = int(os.environ.get("VECTOR_RERANKER_TOP_N", "50"))
+"""First-stage candidates fed to the reranker."""
 
 _EMBEDDING_MODEL_MAP: dict[str, dict] = {
     "bge-m3": {
