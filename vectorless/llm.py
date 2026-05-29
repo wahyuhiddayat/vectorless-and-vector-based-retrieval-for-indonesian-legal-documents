@@ -247,9 +247,12 @@ def _call_deepseek(prompt: str, model: str, max_tokens: int,
 
 def _call_vertex(prompt: str, model: str, max_tokens: int,
                  system: str | None = None) -> tuple[str, int, int]:
-    """One Vertex AI Gemini call. Returns (text, input_tokens, output_tokens)."""
-    if system:
-        prompt = system + "\n\n" + prompt
+    """One Vertex AI Gemini call. Returns (text, input_tokens, output_tokens).
+
+    When system is provided, it is sent as Gemini's native
+    system_instruction so Vertex implicit context caching can reuse
+    the stable prefix across calls without explicit cache management.
+    """
     cli = _vertex_client()
     from google.genai import types as gtypes
     cfg_kwargs: dict = {
@@ -257,6 +260,8 @@ def _call_vertex(prompt: str, model: str, max_tokens: int,
         "max_output_tokens": max_tokens,
         "response_mime_type": "application/json",
     }
+    if system:
+        cfg_kwargs["system_instruction"] = system
     if model.startswith("gemini-2.5-flash"):
         cfg_kwargs["thinking_config"] = gtypes.ThinkingConfig(thinking_budget=0)
 
