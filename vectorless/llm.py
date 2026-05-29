@@ -24,6 +24,8 @@ _openai_cache = None
 _anthropic_cache = None
 _vertex_cache = None
 _deepseek_cache = None
+_dashscope_cache = None
+_mimo_cache = None
 _input_tokens = 0
 _output_tokens = 0
 _calls = 0
@@ -74,6 +76,42 @@ def _deepseek_client():
     return _deepseek_cache
 
 
+def _dashscope_client():
+    """Lazy-init DashScope client for Qwen models (OpenAI-compatible)."""
+    global _dashscope_cache
+    if _dashscope_cache is None:
+        from openai import OpenAI
+        api_key = os.environ.get("DASHSCOPE_API_KEY")
+        if not api_key:
+            print("ERROR: DASHSCOPE_API_KEY not set.")
+            sys.exit(1)
+        _dashscope_cache = OpenAI(
+            api_key=api_key,
+            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            timeout=300.0,
+            max_retries=0,
+        )
+    return _dashscope_cache
+
+
+def _mimo_client():
+    """Lazy-init Xiaomi MiMo client (OpenAI-compatible)."""
+    global _mimo_cache
+    if _mimo_cache is None:
+        from openai import OpenAI
+        api_key = os.environ.get("MIMO_API_KEY")
+        if not api_key:
+            print("ERROR: MIMO_API_KEY not set.")
+            sys.exit(1)
+        _mimo_cache = OpenAI(
+            api_key=api_key,
+            base_url="https://api.xiaomimimo.com/v1",
+            timeout=300.0,
+            max_retries=0,
+        )
+    return _mimo_cache
+
+
 def _vertex_client():
     """Lazy-init Google GenAI client on Vertex AI (uses ADC)."""
     global _vertex_cache
@@ -109,6 +147,10 @@ def _backend(model: str) -> str:
         return "vertex"
     if model.startswith("deepseek-"):
         return "deepseek"
+    if model.startswith("qwen"):
+        return "dashscope"
+    if model.startswith("mimo"):
+        return "mimo"
     raise ValueError(f"Unknown model family: {model!r}")
 
 
@@ -245,6 +287,61 @@ def _call_deepseek(prompt: str, model: str, max_tokens: int,
     return text, in_tok, out_tok
 
 
+def _call_mimo(prompt: str, model: str, max_tokens: int,
+               system: str | None = None) -> tuple[str, int, int]:
+    """One Xiaomi MiMo call. Returns (text, input_tokens, output_tokens).
+
+    Sends system as a separate message so MiMo's prefix cache can reuse
+    the stable prefix across calls.
+    """
+    cli = _mimo_client()
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+        "max_tokens": max_tokens,
+        "temperature": 0.0,
+    }
+    resp = cli.chat.completions.create(**kwargs)
+    text = (resp.choices[0].message.content or "").strip()
+    in_tok = getattr(resp.usage, "prompt_tokens", 0) or 0
+    out_tok = getattr(resp.usage, "completion_tokens", 0) or 0
+    return text, in_tok, out_tok
+
+
+def _call_qwen(prompt: str, model: str, max_tokens: int,
+               system: str | None = None) -> tuple[str, int, int]:
+    """One Qwen DashScope call. Returns (text, input_tokens, output_tokens).
+
+    Sends system as a separate message so Qwen's prefix cache, when
+    enabled, can reuse the stable prefix across calls. Thinking is
+    disabled for structured JSON output where the model exposes the
+    enable_thinking flag.
+    """
+    cli = _dashscope_client()
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    kwargs: dict = {
+        "model": model,
+        "messages": messages,
+        "response_format": {"type": "json_object"},
+        "max_tokens": max_tokens,
+        "temperature": 0.0,
+        "extra_body": {"enable_thinking": False},
+    }
+    resp = cli.chat.completions.create(**kwargs)
+    text = (resp.choices[0].message.content or "").strip()
+    in_tok = getattr(resp.usage, "prompt_tokens", 0) or 0
+    out_tok = getattr(resp.usage, "completion_tokens", 0) or 0
+    return text, in_tok, out_tok
+
+
 def _call_vertex(prompt: str, model: str, max_tokens: int,
                  system: str | None = None) -> tuple[str, int, int]:
     """One Vertex AI Gemini call. Returns (text, input_tokens, output_tokens).
@@ -289,6 +386,10 @@ def _call_backend(prompt: str, model: str, max_tokens: int,
         return _call_vertex(prompt, model, max_tokens, system=system)
     if backend == "deepseek":
         return _call_deepseek(prompt, model, max_tokens, system=system)
+    if backend == "dashscope":
+        return _call_qwen(prompt, model, max_tokens, system=system)
+    if backend == "mimo":
+        return _call_mimo(prompt, model, max_tokens, system=system)
     raise ValueError(f"Unknown backend: {backend}")
 
 
