@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 
 from rank_bm25 import BM25Okapi
@@ -107,8 +108,8 @@ Balas dalam format JSON:
     return result
 
 
-MAX_ACTIONS = 30
-MAX_READS = 18
+MAX_ACTIONS = int(os.environ.get("LLM_TREE_MAX_ACTIONS", "30"))
+MAX_READS = int(os.environ.get("LLM_TREE_MAX_READS", "18"))
 OBSERVATION_RENDER_CAP = 1800
 SCRATCHPAD_RECENT_FULL = 2
 DEFAULT_TOP_K = 10

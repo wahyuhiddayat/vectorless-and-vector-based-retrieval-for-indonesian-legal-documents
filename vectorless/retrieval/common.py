@@ -15,7 +15,7 @@ load_dotenv()
 DATA_INDEX = Path(os.environ.get("DATA_INDEX", "data/index_pasal"))
 LOG_DIR = Path("data/retrieval_logs")
 
-DOC_PICK_TOP_K = 3
+DOC_PICK_TOP_K = int(os.environ.get("LLM_TREE_DOC_PICK_TOP_K", "3"))
 """Number of documents selected at stage 1 for tree-based variants."""
 
 

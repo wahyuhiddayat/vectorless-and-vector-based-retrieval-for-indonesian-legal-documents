@@ -55,6 +55,7 @@ _FILE_NOT_FOUND_PATTERNS = (
 )
 _LLM_EMPTY_PATTERNS = (
     "no relevant documents", "no relevant nodes", "no relevant",
+    "submitted no valid node", "phase 1 returned no candidates",
 )
 _5XX_PATTERNS = ("500", "502", "503", "504", "service unavailable", "overloaded")
 
