@@ -34,11 +34,13 @@ def vector_search(query: str, top_k: int, verbose: bool = True,
     if query_vec is None:
         query_vec = embed_query(query)
 
+    from qdrant_client.models import SearchParams
     qdrant = get_qdrant_client()
     response = qdrant.query_points(
         collection_name=_common.COLLECTION_NAME,
         query=query_vec,
         limit=top_k,
+        search_params=SearchParams(hnsw_ef=_common.HNSW_EF_SEARCH),
     )
 
     rankings = []

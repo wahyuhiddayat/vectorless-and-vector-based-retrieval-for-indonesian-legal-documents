@@ -20,6 +20,12 @@ LOG_DIR = Path("data/retrieval_logs")
 RERANKER_TOP_N = int(os.environ.get("VECTOR_RERANKER_TOP_N", "50"))
 """First-stage candidates fed to the reranker."""
 
+HNSW_EF_SEARCH = int(os.environ.get("VECTOR_HNSW_EF_SEARCH", "128"))
+"""Qdrant HNSW search-time exploration depth. Higher means better recall, slower query."""
+
+RERANKER_FP32 = os.environ.get("VECTOR_RERANKER_FP32", "0") == "1"
+"""Force reranker weights to float32 on CUDA. Default is bfloat16 (smaller, faster)."""
+
 _EMBEDDING_MODEL_MAP: dict[str, dict] = {
     "bge-m3": {
         "model_id": "BAAI/bge-m3",
@@ -57,6 +63,12 @@ _RERANKER_REGISTRY: dict[str, dict] = {
         "model_id": "tomaarsen/Qwen3-Reranker-0.6B-seq-cls",
         "backend": "cross_encoder",
         "predict_batch_size": 16,
+    },
+    "bge-reranker-v2-gemma": {
+        # 2.5B-param Gemma-based reranker. Larger than v2-m3 (568M), needs more VRAM.
+        "model_id": "BAAI/bge-reranker-v2-gemma",
+        "backend": "cross_encoder",
+        "predict_batch_size": 32,
     },
 }
 
