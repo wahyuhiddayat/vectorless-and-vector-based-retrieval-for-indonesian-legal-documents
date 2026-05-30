@@ -65,6 +65,7 @@ RERANKERS = [
     "none",
     "bge-reranker-v2-m3",
     "qwen3-reranker-0.6b",
+    "bge-reranker-v2-gemma",
 ]
 LLM_INTER_QUERY_DELAY_S = 3.0
 PROCESS_TIMEOUT_S = 900
