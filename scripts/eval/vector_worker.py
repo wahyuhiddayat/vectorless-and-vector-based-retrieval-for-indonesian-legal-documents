@@ -31,7 +31,7 @@ _MODEL_SHORT = {
     "all-nusabert-large-v4": "nusabert",
 }
 
-_RERANKER_CHOICES = ["none", "bge-reranker-v2-m3", "qwen3-reranker-0.6b"]
+_RERANKER_CHOICES = ["none", "bge-reranker-v2-m3", "qwen3-reranker-0.6b", "bge-reranker-v2-gemma"]
 
 _BATCH_END_SENTINEL = "--DONE--"
 
@@ -86,7 +86,7 @@ def main() -> int:
                     help="Embedding model. bge-m3 | multilingual-e5-large-instruct | "
                          "all-nusabert-large-v4")
     ap.add_argument("--reranker", default="none", choices=_RERANKER_CHOICES,
-                    help="Reranker. none | bge-reranker-v2-m3 | qwen3-reranker-0.6b")
+                    help="Reranker. none | bge-reranker-v2-m3 | qwen3-reranker-0.6b | bge-reranker-v2-gemma")
     ap.add_argument("--query", default=None,
                     help="Single-query mode. If omitted, worker reads batch from stdin.")
     ap.add_argument("--top-k", type=int, default=10)
