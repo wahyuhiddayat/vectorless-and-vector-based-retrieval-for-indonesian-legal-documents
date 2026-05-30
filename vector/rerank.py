@@ -5,7 +5,7 @@ them by relevance. Supports encoder cross-attention and decoder LLM
 pointwise backends via the sentence-transformers CrossEncoder API.
 """
 
-from .common import _RERANKER_REGISTRY
+from .common import _RERANKER_REGISTRY, RERANKER_FP32
 
 
 _QWEN_INSTRUCTION = (
@@ -20,18 +20,22 @@ _ce_model_cache: dict = {}
 def _get_cross_encoder(model_id: str):
     """Load and cache a CrossEncoder model.
 
-    Uses bfloat16 weights on CUDA to reduce VRAM usage. The dtype is
-    set via model_kwargs rather than post-hoc casting because the
-    latter breaks input handling on some decoder models.
+    Defaults to bfloat16 weights on CUDA to reduce VRAM usage. Setting
+    `VECTOR_RERANKER_FP32=1` forces float32 weights, which roughly
+    doubles VRAM and halves throughput but eliminates bf16 rounding
+    that may shift borderline scores. The dtype is set via model_kwargs
+    rather than post-hoc casting because the latter breaks input
+    handling on some decoder models.
     """
     if model_id not in _ce_model_cache:
         import torch
         from sentence_transformers import CrossEncoder
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            dtype = torch.float32 if RERANKER_FP32 else torch.bfloat16
             ce = CrossEncoder(
                 model_id,
-                model_kwargs={"torch_dtype": torch.bfloat16},
+                model_kwargs={"torch_dtype": dtype},
             )
         else:
             ce = CrossEncoder(model_id)
