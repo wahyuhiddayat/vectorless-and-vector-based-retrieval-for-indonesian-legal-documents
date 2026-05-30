@@ -36,11 +36,6 @@ INTERVENTION_THRESHOLD = 0.003
 """Minimum MRR@10 lift required to accept a model upgrade or query expansion."""
 
 
-def systems_string(reranker: str) -> str:
-    """Build the --systems argument for the vector eval harness."""
-    return f"vector-dense:bge-m3:{reranker}"
-
-
 def run_eval(
     label: str,
     reranker: str,
@@ -65,7 +60,9 @@ def run_eval(
     cmd = [
         sys.executable, "scripts/eval/vector.py",
         "--label", label,
-        "--systems", systems_string(reranker),
+        "--systems", "vector-dense",
+        "--embedding-models", "bge-m3",
+        "--rerankers", reranker,
         "--granularities", "pasal",
         "--split", "dev",
         "--qdrant-path", qdrant_path,
