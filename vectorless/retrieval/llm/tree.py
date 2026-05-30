@@ -584,8 +584,15 @@ def retrieve(query: str,
                         reads_used += 1
 
         elif action == "submit":
-            refs = args.get("node_ids") or []
-            reasoning = args.get("reasoning", "")
+            # Some models return args as a bare list of node refs instead
+            # of the documented {"node_ids": [...], "reasoning": "..."} dict.
+            # Accept both shapes so a schema-loose model is not penalized.
+            if isinstance(args, list):
+                refs = args
+                reasoning = ""
+            else:
+                refs = args.get("node_ids") or []
+                reasoning = args.get("reasoning", "")
             resolved: list[dict] = []
             invalid: list[str] = []
             for ref in refs:
