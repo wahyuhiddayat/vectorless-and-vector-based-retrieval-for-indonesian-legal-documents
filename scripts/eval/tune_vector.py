@@ -69,7 +69,6 @@ def run_eval(
         "--granularities", "pasal",
         "--split", "dev",
         "--qdrant-path", qdrant_path,
-        "--parallel-combos", "1",
     ]
     if query_expansion is not None:
         cmd.extend(["--query-expansion", str(query_expansion)])
