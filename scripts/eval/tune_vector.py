@@ -1,18 +1,18 @@
 """Sequential ablation tuning for the dense vector retrieval pipeline.
 
-Runs 12 dev-split evaluations on the bge-m3 + bge-reranker pipeline,
+Runs 10 dev-split evaluations on the bge-m3 + bge-reranker pipeline,
 carrying each step's winner forward into the next step. Ablation order
-is candidate pool size, HNSW search depth, reranker dtype, reranker
-model upgrade, and query expansion. Decision rules are encoded as
-TIE_TOLERANCE (within-noise threshold for tie-breaking) and
-INTERVENTION_THRESHOLD (minimum lift to accept an upgrade).
+is candidate pool size, HNSW search depth, reranker model upgrade, and
+query expansion. Decision rules are encoded as TIE_TOLERANCE
+(within-noise threshold for tie-breaking) and INTERVENTION_THRESHOLD
+(minimum lift to accept an upgrade).
 
 Usage:
     python scripts/eval/tune_vector.py --qdrant-path ./qdrant_local
     python scripts/eval/tune_vector.py --qdrant-path ./qdrant_local --dry-run
 
 Outputs:
-    - 12 eval run directories under data/eval_runs (run38..run42 series)
+    - 10 eval run directories under data/eval_runs (run38..run42 series)
     - data/eval_runs/tune_vector_log.json with the full decision history
 """
 
@@ -162,13 +162,12 @@ def main() -> int:
         "VECTOR_GRANULARITY": "pasal",
         "VECTOR_RERANKER_TOP_N": 50,
         "VECTOR_HNSW_EF_SEARCH": 128,
-        "VECTOR_RERANKER_FP32": 0,
     }
     decision_log = []
 
     # Sweep 1, VECTOR_RERANKER_TOP_N
     print("\n" + "#" * 72)
-    print("# SWEEP 1 of 3, VECTOR_RERANKER_TOP_N")
+    print("# SWEEP 1 of 2, VECTOR_RERANKER_TOP_N")
     print("#" * 72)
     sweep1_results = []
     for top_n in [20, 50, 100, 200]:
@@ -191,7 +190,7 @@ def main() -> int:
 
     # Sweep 2, VECTOR_HNSW_EF_SEARCH
     print("\n" + "#" * 72)
-    print("# SWEEP 2 of 3, VECTOR_HNSW_EF_SEARCH")
+    print("# SWEEP 2 of 2, VECTOR_HNSW_EF_SEARCH")
     print("#" * 72)
     sweep2_results = []
     for ef in [64, 128, 256, 512]:
@@ -208,30 +207,14 @@ def main() -> int:
         "results": [{"value": v, **m} for v, m in sweep2_results],
     })
 
-    # Sweep 3, VECTOR_RERANKER_FP32
-    print("\n" + "#" * 72)
-    print("# SWEEP 3 of 3, VECTOR_RERANKER_FP32")
-    print("#" * 72)
-    sweep3_results = []
-    for fp32 in [0, 1]:
-        label = f"run40_fp32{fp32}_topn{winner_top_n}_ef{winner_ef}"
-        env = {**state, "VECTOR_RERANKER_FP32": fp32}
-        run_dir = run_eval(label, "bge-reranker-v2-m3", env, args.qdrant_path)
-        sweep3_results.append((fp32, read_metrics(run_dir)))
-    winner_fp32, tuned_v2m3_metrics = pick_winner_smaller_tie(sweep3_results)
-    state["VECTOR_RERANKER_FP32"] = winner_fp32
-    print_table("Sweep 3 VECTOR_RERANKER_FP32", sweep3_results, winner_fp32)
-    decision_log.append({
-        "step": "sweep_dtype",
-        "winner": winner_fp32,
-        "results": [{"value": v, **m} for v, m in sweep3_results],
-    })
+    # Use sweep 2 winner config as the tuned-v2m3 baseline for the upgrade comparison.
+    tuned_v2m3_metrics = next(m for v, m in sweep2_results if v == winner_ef)
 
     # Reranker model upgrade
     print("\n" + "#" * 72)
     print("# RERANKER UPGRADE, bge-reranker-v2-m3 to bge-reranker-v2-gemma")
     print("#" * 72)
-    label_upgrade = f"run41_v2gemma_topn{winner_top_n}_ef{winner_ef}_fp32{winner_fp32}"
+    label_upgrade = f"run41_v2gemma_topn{winner_top_n}_ef{winner_ef}"
     env_upgrade = {**state, "VECTOR_RERANKER": "bge-reranker-v2-gemma"}
     run_dir_upgrade = run_eval(label_upgrade, "bge-reranker-v2-gemma", env_upgrade, args.qdrant_path)
     gemma_metrics = read_metrics(run_dir_upgrade)
@@ -263,7 +246,7 @@ def main() -> int:
     print("# QUERY EXPANSION on tuned winner")
     print("#" * 72)
     short_rerank = final_reranker.replace("bge-reranker-", "").replace("-", "")
-    label_qe = f"run42_qe_{short_rerank}_topn{winner_top_n}_ef{winner_ef}_fp32{winner_fp32}"
+    label_qe = f"run42_qe_{short_rerank}_topn{winner_top_n}_ef{winner_ef}"
     qe_path = REPO_ROOT / "data" / "query_expansion" / "dev_expanded.json"
     run_dir_qe = run_eval(
         label_qe, final_reranker, state, args.qdrant_path,
@@ -299,7 +282,6 @@ def main() -> int:
     print(f"  Reranker:        {final_reranker}")
     print(f"  RERANKER_TOP_N:  {winner_top_n}")
     print(f"  HNSW_EF_SEARCH:  {winner_ef}")
-    print(f"  RERANKER_FP32:   {'on' if winner_fp32 == 1 else 'off'}")
     print(f"  Query expansion: {'applied' if apply_qe else 'rejected'}")
     print(f"  Final metrics:")
     print(f"    MRR@10 = {final_metrics['mrr@10']:.4f}")
@@ -315,7 +297,6 @@ def main() -> int:
                 "reranker": final_reranker,
                 "rerank_top_n": winner_top_n,
                 "hnsw_ef_search": winner_ef,
-                "reranker_fp32": bool(winner_fp32),
                 "query_expansion": apply_qe,
             },
             "final_metrics": final_metrics,
