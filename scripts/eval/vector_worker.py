@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -175,7 +176,7 @@ def main() -> int:
     try:
         query_vecs = embed_queries([p["query"] for p in pending])
     except Exception as exc:
-        # Hard failure — emit one error per pending qid so the orchestrator
+        # Hard failure, emit one error per pending qid so the orchestrator
         # marks them all rather than hanging on missing output.
         for p in pending:
             err_payload = {
@@ -193,12 +194,27 @@ def main() -> int:
             sys.stdout.flush()
         return 1
 
+    # Single-query embedding latency, measured once on the now-resident model.
+    # The batched pass above amortizes fixed per-call overhead across all
+    # queries and reports near-zero embed time, which is fine for small models
+    # but understates large ones such as gemma2. This probe is the realistic
+    # per-query serving cost and is folded into elapsed_s so the latency matches
+    # how the vectorless side is measured, one query end to end.
+    t_single = time.time()
+    embed_queries([pending[0]["query"]])
+    embed_single_s = time.time() - t_single
+
     for p, vec in zip(pending, query_vecs):
         payload = _make_payload(
             args, llm_model,
             qid=p["qid"], top_k=p["top_k"], query=p["query"],
             retrieve_fn=retrieve, query_vec=vec,
         )
+        metrics = payload.get("result", {}).get("metrics")
+        if metrics is not None:
+            metrics["retrieve_s"] = metrics["elapsed_s"]
+            metrics["embed_s"] = round(embed_single_s, 3)
+            metrics["elapsed_s"] = round(metrics["retrieve_s"] + embed_single_s, 2)
         print(json.dumps(payload, ensure_ascii=False))
         sys.stdout.flush()
 
