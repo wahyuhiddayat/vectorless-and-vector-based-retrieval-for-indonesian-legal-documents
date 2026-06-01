@@ -5,7 +5,12 @@ them by relevance. Supports encoder cross-attention and decoder LLM
 pointwise backends via the sentence-transformers CrossEncoder API.
 """
 
-from .common import _RERANKER_REGISTRY, RERANKER_FP32, RERANKER_MAX_LENGTH
+from .common import (
+    _RERANKER_REGISTRY,
+    RERANKER_BATCH_SIZE,
+    RERANKER_FP32,
+    RERANKER_MAX_LENGTH,
+)
 
 
 _QWEN_INSTRUCTION = (
@@ -27,24 +32,22 @@ def _get_cross_encoder(model_id: str):
     rather than post-hoc casting because the latter breaks input
     handling on some decoder models.
 
-    Pairs are truncated to `RERANKER_MAX_LENGTH` tokens. Decoder rerankers
-    such as bge-reranker-v2-gemma default to an 8192 context, and without
-    this cap a long pasal blows up activation memory on a 24 GB GPU.
+    When `RERANKER_MAX_LENGTH` is unset the model reads at its native context
+    window, so a full pasal is never truncated. Setting it reproduces the older
+    capped runs. Pasals top out near 3200 tokens, well inside the native 8192,
+    so the native window is the memory-safe default.
     """
     if model_id not in _ce_model_cache:
         import torch
         from sentence_transformers import CrossEncoder
+        kwargs = {}
+        if RERANKER_MAX_LENGTH is not None:
+            kwargs["max_length"] = RERANKER_MAX_LENGTH
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             dtype = torch.float32 if RERANKER_FP32 else torch.bfloat16
-            ce = CrossEncoder(
-                model_id,
-                max_length=RERANKER_MAX_LENGTH,
-                model_kwargs={"torch_dtype": dtype},
-            )
-        else:
-            ce = CrossEncoder(model_id, max_length=RERANKER_MAX_LENGTH)
-        _ce_model_cache[model_id] = ce
+            kwargs["model_kwargs"] = {"torch_dtype": dtype}
+        _ce_model_cache[model_id] = CrossEncoder(model_id, **kwargs)
     return _ce_model_cache[model_id]
 
 
@@ -111,7 +114,7 @@ def rerank(query: str, candidates: list[dict], reranker_name: str,
             pairs = _format_qwen_pairs(query, candidates)
         else:
             pairs = [(query, c["text"]) for c in candidates]
-        batch_size = cfg.get("predict_batch_size", 32)
+        batch_size = RERANKER_BATCH_SIZE or cfg.get("predict_batch_size", 32)
         scores = ce.predict(pairs, batch_size=batch_size, show_progress_bar=False)
         scored = [(float(s), c) for s, c in zip(scores, candidates)]
         scored.sort(key=lambda x: x[0], reverse=True)

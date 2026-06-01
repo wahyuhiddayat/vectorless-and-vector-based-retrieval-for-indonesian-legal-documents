@@ -26,10 +26,18 @@ HNSW_EF_SEARCH = int(os.environ.get("VECTOR_HNSW_EF_SEARCH", "128"))
 RERANKER_FP32 = os.environ.get("VECTOR_RERANKER_FP32", "0") == "1"
 """Force reranker weights to float32 on CUDA. Default is bfloat16 (smaller, faster)."""
 
-RERANKER_MAX_LENGTH = int(os.environ.get("VECTOR_RERANKER_MAX_LENGTH", "512"))
-"""Token cap on the query-document pair fed to the reranker. Caps activation
-memory for long pasals and equalizes the context window across rerankers so the
-comparison reflects model capacity, not how much text each model can read."""
+_max_len_env = os.environ.get("VECTOR_RERANKER_MAX_LENGTH")
+RERANKER_MAX_LENGTH = int(_max_len_env) if _max_len_env else None
+"""Token cap on the query-document pair fed to the reranker. Unset means the
+reranker reads the full pasal at its native context window, the same text the
+embedder indexes and the vectorless agent reads, so the comparison is fair
+across both stages and both paradigms. Set the env var to a number only to
+reproduce the old capped runs."""
+
+_batch_env = os.environ.get("VECTOR_RERANKER_BATCH_SIZE")
+RERANKER_BATCH_SIZE = int(_batch_env) if _batch_env else None
+"""Override the per-model reranker batch size from the registry. Used to fit a
+larger reranker at the native context window without editing the registry."""
 
 _EMBEDDING_MODEL_MAP: dict[str, dict] = {
     "bge-m3": {
