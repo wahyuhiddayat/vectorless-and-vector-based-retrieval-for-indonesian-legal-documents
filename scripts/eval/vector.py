@@ -60,6 +60,7 @@ EMBEDDING_MODELS = [
     "bge-m3",
     "multilingual-e5-large-instruct",
     "all-nusabert-large-v4",
+    "bge-multilingual-gemma2",
 ]
 RERANKERS = [
     "none",
