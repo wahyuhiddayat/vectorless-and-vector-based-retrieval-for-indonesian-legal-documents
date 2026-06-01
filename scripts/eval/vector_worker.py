@@ -29,6 +29,7 @@ _MODEL_SHORT = {
     "bge-m3": "bgem3",
     "multilingual-e5-large-instruct": "e5",
     "all-nusabert-large-v4": "nusabert",
+    "bge-multilingual-gemma2": "gemma2",
 }
 
 _RERANKER_CHOICES = ["none", "bge-reranker-v2-m3", "qwen3-reranker-0.6b", "bge-reranker-v2-gemma"]

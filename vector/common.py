@@ -26,6 +26,11 @@ HNSW_EF_SEARCH = int(os.environ.get("VECTOR_HNSW_EF_SEARCH", "128"))
 RERANKER_FP32 = os.environ.get("VECTOR_RERANKER_FP32", "0") == "1"
 """Force reranker weights to float32 on CUDA. Default is bfloat16 (smaller, faster)."""
 
+RERANKER_MAX_LENGTH = int(os.environ.get("VECTOR_RERANKER_MAX_LENGTH", "512"))
+"""Token cap on the query-document pair fed to the reranker. Caps activation
+memory for long pasals and equalizes the context window across rerankers so the
+comparison reflects model capacity, not how much text each model can read."""
+
 _EMBEDDING_MODEL_MAP: dict[str, dict] = {
     "bge-m3": {
         "model_id": "BAAI/bge-m3",
@@ -45,6 +50,19 @@ _EMBEDDING_MODEL_MAP: dict[str, dict] = {
         "model_id": "LazarusNLP/all-nusabert-large-v4",
         "dim": 1024,
         "backend": "sentence_transformers",
+    },
+    "bge-multilingual-gemma2": {
+        # Gemma-2-9b embedding, last-token pooling, 3584-dim. Loaded in bf16
+        # to fit a 24 GB L4. Queries take an instruction prefix in the gemma2
+        # format, which differs from the e5 "Instruct:/Query:" layout.
+        "model_id": "BAAI/bge-multilingual-gemma2",
+        "dim": 3584,
+        "backend": "sentence_transformers",
+        "query_instruction": (
+            "Given a legal question in Indonesian, retrieve relevant legal "
+            "document sections that answer the question"
+        ),
+        "query_template": "<instruct>{instruction}\n<query>{query}",
     },
 }
 
@@ -66,9 +84,10 @@ _RERANKER_REGISTRY: dict[str, dict] = {
     },
     "bge-reranker-v2-gemma": {
         # 2.5B-param Gemma-based reranker. Larger than v2-m3 (568M), needs more VRAM.
+        # Batch 16 fits a 24 GB L4 once VECTOR_RERANKER_MAX_LENGTH caps the pairs.
         "model_id": "BAAI/bge-reranker-v2-gemma",
         "backend": "cross_encoder",
-        "predict_batch_size": 32,
+        "predict_batch_size": 16,
     },
 }
 
@@ -93,11 +112,36 @@ _st_model_cache: dict = {}
 
 
 def _get_st_model(model_id: str):
-    """Create and cache a SentenceTransformer model."""
+    """Create and cache a SentenceTransformer model.
+
+    The gemma2 embedding is a 9B model that only fits a 24 GB L4 in bfloat16.
+    Other models keep their native precision so stage 1 results stay
+    bit-reproducible.
+    """
     if model_id not in _st_model_cache:
         from sentence_transformers import SentenceTransformer
-        _st_model_cache[model_id] = SentenceTransformer(model_id)
+        if "gemma" in model_id.lower():
+            import torch
+            _st_model_cache[model_id] = SentenceTransformer(
+                model_id, model_kwargs={"torch_dtype": torch.bfloat16}
+            )
+        else:
+            _st_model_cache[model_id] = SentenceTransformer(model_id)
     return _st_model_cache[model_id]
+
+
+def _format_query(cfg: dict, query: str) -> str:
+    """Apply a model's query-instruction template, or return the raw query.
+
+    Models without a `query_instruction` embed the bare query. Models with one
+    default to the e5 "Instruct:/Query:" layout unless they declare their own
+    `query_template`, which gemma2 does.
+    """
+    instruction = cfg.get("query_instruction")
+    if not instruction:
+        return query
+    template = cfg.get("query_template", "Instruct: {instruction}\nQuery: {query}")
+    return template.format(instruction=instruction, query=query)
 
 
 def embed_query(query: str) -> list[float]:
@@ -107,8 +151,7 @@ def embed_query(query: str) -> list[float]:
         raise ValueError(f"Unknown embedding model: {EMBEDDING_MODEL!r}")
 
     st = _get_st_model(cfg["model_id"])
-    instruction = cfg.get("query_instruction")
-    text = f"Instruct: {instruction}\nQuery: {query}" if instruction else query
+    text = _format_query(cfg, query)
     vec = st.encode(text, normalize_embeddings=True)
     return [float(x) for x in vec]
 
@@ -120,11 +163,7 @@ def embed_queries(queries: list[str], batch_size: int = 64) -> list[list[float]]
         raise ValueError(f"Unknown embedding model: {EMBEDDING_MODEL!r}")
 
     st = _get_st_model(cfg["model_id"])
-    instruction = cfg.get("query_instruction")
-    texts = [
-        f"Instruct: {instruction}\nQuery: {q}" if instruction else q
-        for q in queries
-    ]
+    texts = [_format_query(cfg, q) for q in queries]
     vecs = st.encode(
         texts,
         normalize_embeddings=True,

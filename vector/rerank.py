@@ -5,7 +5,7 @@ them by relevance. Supports encoder cross-attention and decoder LLM
 pointwise backends via the sentence-transformers CrossEncoder API.
 """
 
-from .common import _RERANKER_REGISTRY, RERANKER_FP32
+from .common import _RERANKER_REGISTRY, RERANKER_FP32, RERANKER_MAX_LENGTH
 
 
 _QWEN_INSTRUCTION = (
@@ -26,6 +26,10 @@ def _get_cross_encoder(model_id: str):
     that may shift borderline scores. The dtype is set via model_kwargs
     rather than post-hoc casting because the latter breaks input
     handling on some decoder models.
+
+    Pairs are truncated to `RERANKER_MAX_LENGTH` tokens. Decoder rerankers
+    such as bge-reranker-v2-gemma default to an 8192 context, and without
+    this cap a long pasal blows up activation memory on a 24 GB GPU.
     """
     if model_id not in _ce_model_cache:
         import torch
@@ -35,10 +39,11 @@ def _get_cross_encoder(model_id: str):
             dtype = torch.float32 if RERANKER_FP32 else torch.bfloat16
             ce = CrossEncoder(
                 model_id,
+                max_length=RERANKER_MAX_LENGTH,
                 model_kwargs={"torch_dtype": dtype},
             )
         else:
-            ce = CrossEncoder(model_id)
+            ce = CrossEncoder(model_id, max_length=RERANKER_MAX_LENGTH)
         _ce_model_cache[model_id] = ce
     return _ce_model_cache[model_id]
 

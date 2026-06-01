@@ -44,6 +44,11 @@ _EMBEDDING_MODEL_MAP: dict[str, dict] = {
         "dim": 1024,
         "short": "nusabert",
     },
+    "bge-multilingual-gemma2": {
+        "model_id": "BAAI/bge-multilingual-gemma2",
+        "dim": 3584,
+        "short": "gemma2",
+    },
 }
 
 _SOURCE_TO_GRAN = {
@@ -82,10 +87,18 @@ def collect_leaf_nodes(nodes: list[dict], doc_id: str, doc_title: str) -> list[d
 
 
 def embed_texts_st(texts: list[str], model_id: str) -> list[list[float]]:
-    """Embed passage text with SentenceTransformer."""
+    """Embed passage text with SentenceTransformer.
+
+    The 9B gemma2 model is loaded in bfloat16 to fit a 24 GB L4. Passages are
+    embedded as raw text with no instruction prefix, which gemma2 expects.
+    """
     from sentence_transformers import SentenceTransformer
     print(f"  Loading SentenceTransformer: {model_id}")
-    st = SentenceTransformer(model_id)
+    if "gemma" in model_id.lower():
+        import torch
+        st = SentenceTransformer(model_id, model_kwargs={"torch_dtype": torch.bfloat16})
+    else:
+        st = SentenceTransformer(model_id)
     vecs = st.encode(
         texts,
         batch_size=BATCH_SIZE_ST,
