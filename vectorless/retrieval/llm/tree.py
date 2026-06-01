@@ -407,6 +407,18 @@ def _build_prompt_parts(query: str, scratchpad: list[dict],
     return system, prompt
 
 
+def _coerce_id(value):
+    """Unwrap a schema-loose id that a model may return as a single-item list.
+
+    Some models return node_id or doc_id as a one-element list rather than a
+    string. Unwrapping it keeps read and expand from crashing or failing on a
+    valid intent, matching the leniency already applied to submit.
+    """
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
 def _siblings_hint_multidoc(picked_docs: dict[str, dict], doc_id: str,
                             missing_id: str, limit: int = 5) -> list[str]:
     """Best-effort list of node_ids near the missing id within one doc."""
@@ -424,7 +436,7 @@ def _siblings_hint_multidoc(picked_docs: dict[str, dict], doc_id: str,
                 _walk(n["nodes"])
 
     _walk(doc.get("structure", []))
-    prefix = missing_id.split("_")[0] if missing_id else ""
+    prefix = missing_id.split("_")[0] if isinstance(missing_id, str) and missing_id else ""
     near = [nid for nid in all_ids if prefix and nid.startswith(prefix)]
     return near[:limit] if near else all_ids[:limit]
 
@@ -553,8 +565,8 @@ def retrieve(query: str,
             observation = _tool_inspect_doc(picked_docs, doc_id)
 
         elif action == "expand":
-            doc_id = args.get("doc_id")
-            node_id = args.get("node_id")
+            doc_id = _coerce_id(args.get("doc_id"))
+            node_id = _coerce_id(args.get("node_id"))
             if not doc_id:
                 observation = {"error": f"expand requires doc_id (one of {doc_ids})."}
             elif not node_id:
@@ -569,8 +581,8 @@ def retrieve(query: str,
             if reads_used >= max_reads:
                 observation = {"error": f"Read budget exhausted ({max_reads}). Submit soon."}
             else:
-                doc_id = args.get("doc_id")
-                node_id = args.get("node_id")
+                doc_id = _coerce_id(args.get("doc_id"))
+                node_id = _coerce_id(args.get("node_id"))
                 if not doc_id:
                     observation = {"error": f"read requires doc_id (one of {doc_ids})."}
                 elif not node_id:
