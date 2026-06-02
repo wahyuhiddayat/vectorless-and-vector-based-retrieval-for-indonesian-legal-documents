@@ -77,11 +77,11 @@ def _llm_doc_search(query: str, catalog: list[dict]) -> list[dict]:
     slim_catalog = catalog_for_llm_prompt(catalog)
     docs_text = json.dumps(slim_catalog, ensure_ascii=False, indent=2)
 
-    prompt = f"""\
+    # Catalog is identical for every query, so it goes in the system message
+    # for DeepSeek prefix caching. Only the query varies, in the user message.
+    system = f"""\
 Kamu diberi daftar Undang-Undang Indonesia beserta metadata dan ringkasan isi-nya.
-Pilih UU yang paling mungkin mengandung jawaban untuk pertanyaan hukum berikut.
-
-Pertanyaan: {query}
+Tugasmu memilih UU yang paling mungkin mengandung jawaban untuk pertanyaan hukum dari pengguna.
 
 Daftar UU:
 {docs_text}
@@ -97,9 +97,10 @@ Aturan:
 - Lebih baik over-include sedikit daripada miss UU yang relevan.
 - Pertimbangkan judul, bidang, subjek, materi_pokok, dan doc_summary_text (kalau tersedia).
 - Hanya kembalikan doc_ids kosong [] jika benar-benar tidak ada satupun yang dekat dengan topik pertanyaan.
-- Kembalikan HANYA JSON, tanpa teks lain.
-"""
-    return llm_call(prompt)
+- Kembalikan HANYA JSON, tanpa teks lain."""
+
+    prompt = f"Pertanyaan: {query}\n"
+    return llm_call(prompt, system=system)
 
 
 def doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_K,
