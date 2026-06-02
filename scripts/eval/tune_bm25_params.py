@@ -3,8 +3,10 @@
 Sweeps BM25 k1 and b over a grid and measures, for each cell, the fraction of
 gold pasals that appear in the top-k BM25 node candidates within the gold
 documents. This isolates the node-level BM25 quality that caps what the LLM
-reranker can recover, at zero LLM cost. The winning k1 and b are then set via
-HYBRID_BM25_K1 and HYBRID_BM25_B before running tune_vectorless.py.
+reranker can recover, at zero LLM cost. Step 1 of the vectorless tuning flow
+(tune_vl_step1_bm25params.py) calls this to set HYBRID_BM25_K1 and
+HYBRID_BM25_B for the later steps. This script can also be run standalone to
+inspect the full grid.
 
 Using the gold documents as an oracle for doc selection keeps this a clean
 measure of the node-level BM25 alone, independent of the doc-pick stage.

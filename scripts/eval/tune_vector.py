@@ -3,8 +3,8 @@
 Runs 10 dev-split evaluations on the bge-m3 + bge-reranker pipeline,
 carrying each step's winner forward into the next step. Ablation order
 is candidate pool size, HNSW search depth, reranker model upgrade, and
-query expansion. Decisions use MAP@10 as the primary metric, matching
-tune_vectorless.py, because the ground truth is partly multi-gold. Rules
+query expansion. Decisions use MAP@10 as the primary metric, matching the
+vectorless tuning steps, because the ground truth is partly multi-gold. Rules
 are encoded as TIE_TOLERANCE (within-noise threshold for tie-breaking)
 and INTERVENTION_THRESHOLD (minimum lift to accept an upgrade).
 
