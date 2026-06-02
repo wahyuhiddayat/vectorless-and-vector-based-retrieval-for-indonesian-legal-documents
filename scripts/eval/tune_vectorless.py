@@ -5,10 +5,11 @@ step's winner forward. Decisions use MAP@10 as the primary metric, because
 the ground truth is partly multi-gold (multihop queries have two required
 pasals) and MAP credits retrieving all of them, while MRR ignores the second.
 
-Ablation order is candidate pool size (HYBRID_BM25_TOP_K), document pool size
-(HYBRID_DOC_PICK_TOP_K), retrieval-LLM model upgrade, then query expansion.
-BM25 k1 and b are tuned separately on candidate recall (free, no LLM) and set
-via HYBRID_BM25_K1 and HYBRID_BM25_B before running this orchestrator.
+Ablation order is BM25 k1 and b (free, on candidate recall, no LLM), candidate
+pool size (HYBRID_BM25_TOP_K), document pool size (HYBRID_DOC_PICK_TOP_K),
+retrieval-LLM model upgrade, then query expansion. The k1/b step is free
+because those parameters only change which candidates BM25 surfaces, which is
+measurable without running the reranker.
 
 Usage:
     python scripts/eval/tune_vectorless.py
@@ -31,6 +32,8 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 EVAL_RUNS_DIR = REPO_ROOT / "data" / "eval_runs"
 
 TIE_TOLERANCE = 0.002
@@ -151,12 +154,32 @@ def main() -> int:
     sfx = args.label_suffix
 
     # Carried-forward state. Starts at the stage 1 hybrid-tree defaults.
-    # BM25 k1/b are inherited from the environment (tuned separately).
     state = {
         "HYBRID_BM25_TOP_K": 10,
         "HYBRID_DOC_PICK_TOP_K": 3,
     }
     decision_log = []
+
+    # Step 0, BM25 k1/b on candidate recall. Free, no LLM call, because k1/b
+    # only change which candidates BM25 surfaces, which is measurable without
+    # the reranker. Measured at a representative pool of 20.
+    print("\n" + "#" * 72)
+    print("# STEP 0, BM25 k1/b on candidate recall (free, no LLM)")
+    print("#" * 72)
+    if args.dry_run:
+        print("  [dry-run] would grid-search k1/b on candidate recall")
+    else:
+        from scripts.eval.tune_bm25_params import tune_k1_b
+        bm = tune_k1_b(split="dev", bm25_top_k=20)
+        state["HYBRID_BM25_K1"] = bm["best_k1"]
+        state["HYBRID_BM25_B"] = bm["best_b"]
+        gain = bm["best_recall"] - bm["default_recall"]
+        print(f"  Winner k1={bm['best_k1']}  b={bm['best_b']}  recall@20={bm['best_recall']:.4f}")
+        print(f"  (default 1.5/0.75 recall@20={bm['default_recall']:.4f}, gain {gain:+.4f})")
+        decision_log.append({
+            "step": "bm25_k1_b", "k1": bm["best_k1"], "b": bm["best_b"],
+            "recall@20": bm["best_recall"], "default_recall": bm["default_recall"],
+        })
 
     # Sweep 1, HYBRID_BM25_TOP_K (candidate pool fed to the LLM reranker)
     print("\n" + "#" * 72)
@@ -256,7 +279,7 @@ def main() -> int:
     print("#" * 72)
     print(f"  HYBRID_BM25_TOP_K:     {winner_topk}")
     print(f"  HYBRID_DOC_PICK_TOP_K: {winner_docpick}")
-    print(f"  BM25 k1/b:             {os.environ.get('HYBRID_BM25_K1','1.5')}/{os.environ.get('HYBRID_BM25_B','0.75')}")
+    print(f"  BM25 k1/b:             {state.get('HYBRID_BM25_K1','1.5')}/{state.get('HYBRID_BM25_B','0.75')}")
     print(f"  Retrieval LLM:         {final_model}")
     print(f"  Query expansion:       {'applied' if apply_qe else 'rejected'}")
     print(f"  Final MAP@10 = {final_metrics['map@10']:.4f}")
@@ -270,8 +293,8 @@ def main() -> int:
         json.dump({
             "completed_at": datetime.now().isoformat(timespec="seconds"),
             "primary_metric": "map@10",
-            "bm25_k1": os.environ.get("HYBRID_BM25_K1", "1.5"),
-            "bm25_b": os.environ.get("HYBRID_BM25_B", "0.75"),
+            "bm25_k1": state.get("HYBRID_BM25_K1", 1.5),
+            "bm25_b": state.get("HYBRID_BM25_B", 0.75),
             "final_config": {
                 "system": "hybrid-tree",
                 "bm25_top_k": winner_topk,
