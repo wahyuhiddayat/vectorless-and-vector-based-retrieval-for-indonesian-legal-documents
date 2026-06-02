@@ -63,7 +63,9 @@ def run_retrieval(system: str, query: str, top_k: int) -> dict:
         from vectorless.retrieval.hybrid import tree as module
 
         module.save_log = lambda _result: None
-        return module.retrieve(query, bm25_top_k=max(top_k, 10), verbose=False)
+        bm25_top_k = int(os.environ.get("HYBRID_BM25_TOP_K", str(max(top_k, 10))))
+        doc_pick = int(os.environ.get("HYBRID_DOC_PICK_TOP_K", "3"))
+        return module.retrieve(query, bm25_top_k=bm25_top_k, top_k_docs=doc_pick, verbose=False)
 
     if system == "hybrid-tree-rrf":
         from vectorless.retrieval.hybrid import tree_rrf as module

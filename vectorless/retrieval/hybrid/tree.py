@@ -12,9 +12,14 @@ Usage:
 
 import argparse
 import json
+import os
 import time
 
 from rank_bm25 import BM25Okapi
+
+BM25_K1 = float(os.environ.get("HYBRID_BM25_K1", "1.5"))
+BM25_B = float(os.environ.get("HYBRID_BM25_B", "0.75"))
+"""BM25 hyperparameters, library defaults unless overridden for tuning."""
 
 from ...llm import call as llm_call, reset_counters, get_stats, snapshot_counters, step_metrics
 from ..common import (
@@ -41,7 +46,7 @@ def _bm25_doc_search(query: str, catalog: list[dict], top_k: int = DOC_PICK_TOP_
     """
     corpus = [tokenize(doc_corpus_string(doc)) for doc in catalog]
 
-    bm25 = BM25Okapi(corpus)
+    bm25 = BM25Okapi(corpus, k1=BM25_K1, b=BM25_B)
     scores = bm25.get_scores(tokenize(query))
 
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
@@ -195,7 +200,7 @@ def _bm25_node_candidates(query: str, doc: dict, top_k: int = 20) -> list[dict]:
             combined += " " + leaf["penjelasan"]
         corpus.append(tokenize(combined))
 
-    bm25 = BM25Okapi(corpus)
+    bm25 = BM25Okapi(corpus, k1=BM25_K1, b=BM25_B)
     scores = bm25.get_scores(tokenize(query))
 
     ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
