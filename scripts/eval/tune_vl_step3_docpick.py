@@ -28,9 +28,7 @@ SWEEP = [1, 2, 3, 5]
 
 def main() -> int:
     """Sweep HYBRID_DOC_PICK_TOP_K and store the winner and its flash metrics."""
-    print("#" * 72)
-    print("# STEP 3 of 5, HYBRID_DOC_PICK_TOP_K sweep")
-    print("#" * 72)
+    print("Step 3 of 5, HYBRID_DOC_PICK_TOP_K sweep, MAP@10 decides the winner.")
     state = load_state()
     require_step(state, "sweep_bm25_top_k")
 

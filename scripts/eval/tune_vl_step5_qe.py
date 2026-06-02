@@ -28,9 +28,7 @@ from scripts.eval.tune_vl_common import (
 
 def main() -> int:
     """Test query expansion, record the decision, and write the final log."""
-    print("#" * 72)
-    print("# STEP 5 of 5, QUERY EXPANSION on tuned winner")
-    print("#" * 72)
+    print("Step 5 of 5, query expansion on the tuned winner.")
     state = load_state()
     require_step(state, "model_upgrade")
 
@@ -64,9 +62,7 @@ def main() -> int:
     state["steps_done"].append("query_expansion")
     save_state(state)
 
-    print("\n" + "#" * 72)
-    print("# FINAL TUNED VECTORLESS (hybrid-tree) WINNER")
-    print("#" * 72)
+    print("\nFinal tuned vectorless winner, hybrid-tree.")
     print(f"  HYBRID_BM25_TOP_K,     {winner_topk}")
     print(f"  HYBRID_DOC_PICK_TOP_K, {winner_docpick}")
     print(f"  BM25 k1/b,             {state['env'].get('HYBRID_BM25_K1', 1.5)}/{state['env'].get('HYBRID_BM25_B', 0.75)}")

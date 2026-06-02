@@ -27,9 +27,7 @@ SWEEP = [10, 20, 30, 50]
 
 def main() -> int:
     """Sweep HYBRID_BM25_TOP_K and record the MAP@10 winner in the state."""
-    print("#" * 72)
-    print("# STEP 2 of 5, HYBRID_BM25_TOP_K sweep")
-    print("#" * 72)
+    print("Step 2 of 5, HYBRID_BM25_TOP_K sweep, MAP@10 decides the winner.")
     state = load_state()
     require_step(state, "bm25_k1_b")
 

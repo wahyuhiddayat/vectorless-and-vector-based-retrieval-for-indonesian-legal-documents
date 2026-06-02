@@ -119,14 +119,11 @@ def run_eval(label: str, env_overrides: dict, query_expansion: Path | None = Non
     for k, v in env_overrides.items():
         env[k] = str(v)
 
-    print()
-    print("=" * 72)
-    print(f"  Starting, {label}{' (resume)' if resume else ''}")
-    print(f"  Env overrides, {env_overrides}")
+    suffix = " (resume)" if resume else ""
+    print(f"\nRunning {label}{suffix}, started {datetime.now().isoformat(timespec='seconds')}.")
+    print(f"  Settings {env_overrides}")
     if query_expansion is not None:
-        print(f"  Query expansion, {query_expansion}")
-    print(f"  Started at, {datetime.now().isoformat(timespec='seconds')}")
-    print("=" * 72)
+        print(f"  Query expansion {query_expansion}")
 
     result = subprocess.run(cmd, env=env, cwd=str(REPO_ROOT))
     if result.returncode != 0:
@@ -182,11 +179,11 @@ def pick_winner_smaller_tie(results: list[tuple]) -> tuple:
 
 
 def print_table(name: str, results: list[tuple], winner_value) -> None:
-    """Print a formatted comparison table for one sweep, MAP@10 first."""
-    print(f"\n--- {name} results ---")
-    print(f"{'Value':<12} {'MAP@10':<8} {'MRR@10':<8} {'H@1':<6} {'R@10':<6} {'Errors':<6}")
+    """Print a plain comparison table for one sweep, sorted by MAP@10."""
+    print(f"\n{name}")
+    print(f"{'value':<12} {'MAP@10':<8} {'MRR@10':<8} {'H@1':<6} {'R@10':<6} {'errors':<6}")
     for v, m in sorted(results, key=lambda x: -x[1]["map@10"]):
-        marker = "  <-- WINNER" if v == winner_value else ""
+        marker = "  winner" if v == winner_value else ""
         print(
             f"{str(v):<12} {m['map@10']:<8.4f} {m['mrr@10']:<8.4f} "
             f"{m['hit@1']:<6.4f} {m['recall@10']:<6.4f} {m['errors']:<6}{marker}"

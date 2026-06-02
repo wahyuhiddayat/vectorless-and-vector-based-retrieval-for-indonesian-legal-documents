@@ -26,9 +26,7 @@ from scripts.eval.tune_vl_common import (
 
 def main() -> int:
     """Test the pro upgrade against the flash baseline and record the decision."""
-    print("#" * 72)
-    print("# STEP 4 of 5, MODEL UPGRADE, deepseek-v4-flash to deepseek-v4-pro")
-    print("#" * 72)
+    print("Step 4 of 5, model upgrade, deepseek-v4-flash to deepseek-v4-pro.")
     state = load_state()
     require_step(state, "sweep_doc_pick_top_k")
 

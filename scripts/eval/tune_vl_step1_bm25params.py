@@ -22,24 +22,28 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.eval.tune_vl_common import default_state, save_state, STATE_PATH
-from scripts.eval.tune_bm25_params import tune_k1_b
+from scripts.eval.tune_bm25_params import tune_k1_b, K1_GRID, B_GRID
 
 
 def main() -> int:
     """Compute k1/b on candidate recall and initialize the tuning state."""
-    print("#" * 72)
-    print("# STEP 1 of 5, BM25 k1/b on candidate recall (free, no LLM)")
-    print("#" * 72)
+    print("Step 1 of 5, BM25 k1/b tuning on candidate recall (no LLM).")
     if STATE_PATH.exists():
-        print(f"  Note, an existing state at {STATE_PATH} will be overwritten.")
+        print(f"An existing state at {STATE_PATH} will be overwritten.")
 
     state = default_state()
     bm = tune_k1_b(split="dev", bm25_top_k=20)
     state["env"]["HYBRID_BM25_K1"] = bm["best_k1"]
     state["env"]["HYBRID_BM25_B"] = bm["best_b"]
     gain = bm["best_recall"] - bm["default_recall"]
-    print(f"  Winner k1={bm['best_k1']}  b={bm['best_b']}  recall@20={bm['best_recall']:.4f}")
-    print(f"  (default 1.5/0.75 recall@20={bm['default_recall']:.4f}, gain {gain:+.4f})")
+
+    print(f"\nGrid {len(K1_GRID)}x{len(B_GRID)}, candidate recall@20, sorted ascending.")
+    print(f"{'k1':>5} {'b':>6} {'recall@20':>10}")
+    for k1, b, r in sorted(bm["results"], key=lambda x: x[2]):
+        marker = "  winner" if k1 == bm["best_k1"] and b == bm["best_b"] else ""
+        print(f"{k1:>5} {b:>6} {r:>10.4f}{marker}")
+    print(f"\nSelected k1={bm['best_k1']}, b={bm['best_b']}, recall@20={bm['best_recall']:.4f}.")
+    print(f"Default 1.5/0.75 recall@20={bm['default_recall']:.4f}, gain {gain:+.4f}.")
 
     state["decision_log"].append({
         "step": "bm25_k1_b", "k1": bm["best_k1"], "b": bm["best_b"],
