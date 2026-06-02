@@ -143,9 +143,10 @@ class ProgressLogger:
         hit1 = sum(r.get("hit@1", 0.0) for r in records) / n
         r10 = sum(r.get("recall@10", 0.0) for r in records) / n
         mrr = sum(r.get("mrr@10", 0.0) for r in records) / n
+        map10 = sum(r.get("map@10", 0.0) for r in records) / n
         avg_tok = sum(r.get("total_tokens", 0) for r in records) / n
         self._emit(
-            f"  === combo summary ===  Hit@1={hit1:.3f}  R@10={r10:.3f}  MRR={mrr:.3f}"
+            f"  === combo summary ===  Hit@1={hit1:.3f}  R@10={r10:.3f}  MRR={mrr:.3f}  MAP={map10:.3f}"
             f"  errors={errors}/{n}  avg_tokens={avg_tok:.0f}  wall={_fmt_time(elapsed_s)}"
         )
 
@@ -199,7 +200,7 @@ class ProgressLogger:
             self._emit(
                 f"  {row['system']:<12} x {row['eval_granularity']:<8}  "
                 f"Hit@1={row.get('hit@1', 0):.3f}  R@10={row.get('recall@10', 0):.3f}  "
-                f"MRR={row.get('mrr@10', 0):.3f}  "
+                f"MRR={row.get('mrr@10', 0):.3f}  MAP={row.get('map@10', 0):.3f}  "
                 f"n={row.get('num_queries', 0)}  errors={row.get('error_count', 0)}"
             )
         total_errors = sum(error_categories.values())

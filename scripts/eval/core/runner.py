@@ -296,12 +296,13 @@ def _execute_one_combo(
                 running_hit1 = sum(r.get("hit@1", 0.0) for r in new_records) / n
                 running_r10 = sum(r.get("recall@10", 0.0) for r in new_records) / n
                 running_mrr = sum(r.get("mrr@10", 0.0) for r in new_records) / n
+                running_map = sum(r.get("map@10", 0.0) for r in new_records) / n
                 total_errors = sum(error_categories.values())
                 wall_now = time.time() - combo_t0
                 tick = (
                     f"  {prefix}[{executed:>4}/{total_to_execute:>4}]  "
                     f"Hit@1={running_hit1:.3f}  R@10={running_r10:.3f}  "
-                    f"MRR={running_mrr:.3f}  errors={total_errors}  "
+                    f"MRR={running_mrr:.3f}  MAP={running_map:.3f}  errors={total_errors}  "
                     f"wall={_fmt_time(wall_now)}"
                 )
                 print(tick, flush=True)
