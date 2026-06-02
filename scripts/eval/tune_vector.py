@@ -3,9 +3,10 @@
 Runs 10 dev-split evaluations on the bge-m3 + bge-reranker pipeline,
 carrying each step's winner forward into the next step. Ablation order
 is candidate pool size, HNSW search depth, reranker model upgrade, and
-query expansion. Decision rules are encoded as TIE_TOLERANCE
-(within-noise threshold for tie-breaking) and INTERVENTION_THRESHOLD
-(minimum lift to accept an upgrade).
+query expansion. Decisions use MAP@10 as the primary metric, matching
+tune_vectorless.py, because the ground truth is partly multi-gold. Rules
+are encoded as TIE_TOLERANCE (within-noise threshold for tie-breaking)
+and INTERVENTION_THRESHOLD (minimum lift to accept an upgrade).
 
 Usage:
     python scripts/eval/tune_vector.py --qdrant-path ./qdrant_local
@@ -108,6 +109,7 @@ def read_metrics(run_dir: Path) -> dict:
         s = json.load(f)
     ov = s["overall"]
     return {
+        "map@10": ov["map@10"],
         "mrr@10": ov["mrr@10"],
         "hit@1": ov["hit@1"],
         "recall@10": ov["recall@10"],
@@ -116,7 +118,11 @@ def read_metrics(run_dir: Path) -> dict:
 
 
 def pick_winner_smaller_tie(results: list[tuple]) -> tuple:
-    """Pick the entry with highest MRR@10, ties within TIE_TOLERANCE go to smaller param.
+    """Pick the entry with highest MAP@10, ties within TIE_TOLERANCE go to smaller param.
+
+    MAP@10 is the primary metric because the ground truth is partly multi-gold
+    (multihop queries require two pasals), and MAP credits retrieving all of
+    them while MRR ignores the second.
 
     Args:
         results: list of (param_value, metrics_dict) tuples.
@@ -124,19 +130,19 @@ def pick_winner_smaller_tie(results: list[tuple]) -> tuple:
     Returns:
         Tuple of (winning_param_value, winning_metrics_dict).
     """
-    best_mrr = max(m["mrr@10"] for _, m in results)
-    contenders = [(v, m) for v, m in results if m["mrr@10"] >= best_mrr - TIE_TOLERANCE]
+    best = max(m["map@10"] for _, m in results)
+    contenders = [(v, m) for v, m in results if m["map@10"] >= best - TIE_TOLERANCE]
     return min(contenders, key=lambda x: x[0])
 
 
 def print_table(name: str, results: list[tuple], winner_value) -> None:
     """Print a formatted comparison table for one sweep."""
     print(f"\n--- {name} results ---")
-    print(f"{'Value':<12} {'MRR@10':<8} {'H@1':<6} {'R@10':<6} {'Errors':<6}")
-    for v, m in sorted(results, key=lambda x: -x[1]["mrr@10"]):
+    print(f"{'Value':<12} {'MAP@10':<8} {'MRR@10':<8} {'H@1':<6} {'R@10':<6} {'Errors':<6}")
+    for v, m in sorted(results, key=lambda x: -x[1]["map@10"]):
         marker = "  <-- WINNER" if v == winner_value else ""
         print(
-            f"{str(v):<12} {m['mrr@10']:<8.4f} "
+            f"{str(v):<12} {m['map@10']:<8.4f} {m['mrr@10']:<8.4f} "
             f"{m['hit@1']:<6.4f} {m['recall@10']:<6.4f} "
             f"{m['errors']:<6}{marker}"
         )
@@ -219,9 +225,9 @@ def main() -> int:
     run_dir_upgrade = run_eval(label_upgrade, "bge-reranker-v2-gemma", env_upgrade, args.qdrant_path)
     gemma_metrics = read_metrics(run_dir_upgrade)
 
-    lift_upgrade = gemma_metrics["mrr@10"] - tuned_v2m3_metrics["mrr@10"]
-    print(f"\n  v2-m3 (tuned baseline): MRR={tuned_v2m3_metrics['mrr@10']:.4f}")
-    print(f"  v2-gemma (upgraded):    MRR={gemma_metrics['mrr@10']:.4f}")
+    lift_upgrade = gemma_metrics["map@10"] - tuned_v2m3_metrics["map@10"]
+    print(f"\n  v2-m3 (tuned baseline): MAP={tuned_v2m3_metrics['map@10']:.4f}")
+    print(f"  v2-gemma (upgraded):    MAP={gemma_metrics['map@10']:.4f}")
     print(f"  Lift over tuned v2-m3:  {lift_upgrade:+.4f}")
 
     if lift_upgrade > INTERVENTION_THRESHOLD:
@@ -254,9 +260,9 @@ def main() -> int:
     )
     qe_metrics = read_metrics(run_dir_qe)
 
-    lift_qe = qe_metrics["mrr@10"] - baseline_for_qe["mrr@10"]
-    print(f"\n  Without QE: MRR={baseline_for_qe['mrr@10']:.4f}")
-    print(f"  With QE:    MRR={qe_metrics['mrr@10']:.4f}")
+    lift_qe = qe_metrics["map@10"] - baseline_for_qe["map@10"]
+    print(f"\n  Without QE: MAP={baseline_for_qe['map@10']:.4f}")
+    print(f"  With QE:    MAP={qe_metrics['map@10']:.4f}")
     print(f"  Lift:       {lift_qe:+.4f}")
 
     if lift_qe > INTERVENTION_THRESHOLD:
@@ -284,6 +290,7 @@ def main() -> int:
     print(f"  HNSW_EF_SEARCH:  {winner_ef}")
     print(f"  Query expansion: {'applied' if apply_qe else 'rejected'}")
     print(f"  Final metrics:")
+    print(f"    MAP@10 = {final_metrics['map@10']:.4f}")
     print(f"    MRR@10 = {final_metrics['mrr@10']:.4f}")
     print(f"    H@1    = {final_metrics['hit@1']:.4f}")
     print(f"    R@10   = {final_metrics['recall@10']:.4f}")
@@ -293,6 +300,7 @@ def main() -> int:
     with open(log_path, "w") as f:
         json.dump({
             "completed_at": datetime.now().isoformat(timespec="seconds"),
+            "primary_metric": "map@10",
             "final_config": {
                 "reranker": final_reranker,
                 "rerank_top_n": winner_top_n,
@@ -301,11 +309,13 @@ def main() -> int:
             },
             "final_metrics": final_metrics,
             "untuned_baseline": {
+                "map@10": 0.8898,
                 "mrr@10": 0.9153,
                 "hit@1": 0.8711,
                 "recall@10": 0.9776,
             },
             "lift_over_baseline": {
+                "map@10": round(final_metrics["map@10"] - 0.8898, 4),
                 "mrr@10": round(final_metrics["mrr@10"] - 0.9153, 4),
                 "hit@1": round(final_metrics["hit@1"] - 0.8711, 4),
                 "recall@10": round(final_metrics["recall@10"] - 0.9776, 4),
