@@ -206,11 +206,33 @@ REQUIRED_RECORD_FIELDS = {
 }
 
 
-def read_records_file(path: Path, *, validate: bool = False) -> list[dict]:
-    """Load all records from one JSONL file. Tolerates empty / missing file.
+def _dedup_by_query_id(records: list[dict]) -> list[dict]:
+    """Keep one record per query_id, last occurrence wins, order preserved.
 
-    With validate=True, drops records that are missing any required field.
-    Stashes the dropped count in last_invalid_count for the runner to log.
+    Resume appends a re-run after the original row rather than overwriting it,
+    so an errored query that is later healed leaves both rows in the file. The
+    successful re-run is always written after the error, so keeping the last
+    record per query_id drops the stale error and keeps the healed result.
+    Records without a query_id are passed through unchanged.
+    """
+    by_qid: dict = {}
+    no_qid: list[dict] = []
+    for r in records:
+        qid = r.get("query_id")
+        if qid is None:
+            no_qid.append(r)
+        else:
+            by_qid[qid] = r
+    return list(by_qid.values()) + no_qid
+
+
+def read_records_file(path: Path, *, validate: bool = False) -> list[dict]:
+    """Load records from one JSONL file, deduplicated by query_id.
+
+    Tolerates empty / missing file. With validate=True, drops records that are
+    missing any required field and stashes the dropped count in
+    last_invalid_count for the runner to log. Duplicate query_ids are collapsed
+    to the last occurrence, see _dedup_by_query_id.
     """
     if not path.exists():
         return []
@@ -233,7 +255,7 @@ def read_records_file(path: Path, *, validate: bool = False) -> list[dict]:
     if invalid_count:
         # Stash count on the function for the runner to surface in logs.
         read_records_file.last_invalid_count = invalid_count  # type: ignore[attr-defined]
-    return records
+    return _dedup_by_query_id(records)
 
 
 def read_all_records(records_dir: Path) -> list[dict]:
