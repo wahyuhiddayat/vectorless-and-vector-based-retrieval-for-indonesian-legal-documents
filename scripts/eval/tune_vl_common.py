@@ -42,9 +42,13 @@ def default_state() -> dict:
     """Return the initial carried-forward state at stage 1 hybrid-tree defaults."""
     return {
         "created_at": datetime.now().isoformat(timespec="seconds"),
+        # RETRIEVAL_MODEL_OVERRIDE is set explicitly to flash so a stray value
+        # left in the shell environment cannot silently force pro. Step 4 is the
+        # only step that overrides it to pro.
         "env": {
             "HYBRID_BM25_TOP_K": 10,
             "HYBRID_DOC_PICK_TOP_K": 3,
+            "RETRIEVAL_MODEL_OVERRIDE": "deepseek-v4-flash",
         },
         "winner_topk": None,
         "winner_docpick": None,
