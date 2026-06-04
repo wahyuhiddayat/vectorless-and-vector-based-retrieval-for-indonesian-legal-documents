@@ -91,11 +91,13 @@ _RERANKER_REGISTRY: dict[str, dict] = {
         "predict_batch_size": 16,
     },
     "bge-reranker-v2-gemma": {
-        # 2.5B-param Gemma-based reranker. Larger than v2-m3 (568M), needs more VRAM.
-        # Batch 16 fits a 24 GB L4 once VECTOR_RERANKER_MAX_LENGTH caps the pairs.
+        # 2.5B-param Gemma-based reranker, the higher-capacity sibling of v2-m3.
+        # Scored as a causal LM through the yes-token logit, its official
+        # interface. The plain CrossEncoder path mis-scores it and reranking
+        # degrades to roughly first-stage quality, observed in run41.
         "model_id": "BAAI/bge-reranker-v2-gemma",
-        "backend": "cross_encoder",
-        "predict_batch_size": 16,
+        "backend": "llm_yes_logit",
+        "predict_batch_size": 8,
     },
 }
 

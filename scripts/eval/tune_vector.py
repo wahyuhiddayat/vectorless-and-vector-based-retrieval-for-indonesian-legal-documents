@@ -31,10 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_RUNS_DIR = REPO_ROOT / "data" / "eval_runs"
 
 TIE_TOLERANCE = 0.002
-"""MRR@10 tolerance for tie-breaking. Ties resolve to the cheaper setting."""
+"""MAP@10 tolerance for tie-breaking. Ties resolve to the cheaper setting."""
 
 INTERVENTION_THRESHOLD = 0.003
-"""Minimum MRR@10 lift required to accept a model upgrade or query expansion."""
+"""Minimum MAP@10 lift required to accept a model upgrade or query expansion."""
 
 
 def run_eval(

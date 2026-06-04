@@ -1,8 +1,11 @@
 """Reranker stage for vector RAG.
 
-Scores first-stage candidates using a CrossEncoder model and reorders
-them by relevance. Supports encoder cross-attention and decoder LLM
-pointwise backends via the sentence-transformers CrossEncoder API.
+Scores first-stage candidates and reorders them by relevance. Two scoring
+backends exist. The cross_encoder backend covers encoder rerankers and
+seq-cls decoder conversions via the sentence-transformers CrossEncoder API.
+The llm_yes_logit backend covers causal-LM rerankers such as
+bge-reranker-v2-gemma, which are scored by the logit of the Yes token at
+the final position, following the official BAAI usage.
 """
 
 from .common import (
@@ -83,6 +86,117 @@ def _format_qwen_pairs(query: str, candidates: list[dict]) -> list[list[str]]:
     return pairs
 
 
+_GEMMA_INSTRUCTION = (
+    "Given a query A and a passage B, determine whether the passage "
+    "contains an answer to the query by providing a prediction of "
+    "either 'Yes' or 'No'."
+)
+
+
+_llm_reranker_cache: dict = {}
+
+
+def _get_llm_reranker(model_id: str):
+    """Load and cache a causal-LM reranker plus its tokenizer and Yes-token id.
+
+    The tokenizer padding side is forced to left so that the final position
+    of every padded row is the true last token, which is where the Yes logit
+    is read. Respects the same dtype env switch as the CrossEncoder loader.
+    """
+    if model_id not in _llm_reranker_cache:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        tokenizer.padding_side = "left"
+        kwargs = {}
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            kwargs["torch_dtype"] = torch.float32 if RERANKER_FP32 else torch.bfloat16
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        if torch.cuda.is_available():
+            model = model.to("cuda")
+        model.eval()
+        yes_loc = tokenizer("Yes", add_special_tokens=False)["input_ids"][0]
+        _llm_reranker_cache[model_id] = (model, tokenizer, yes_loc)
+    return _llm_reranker_cache[model_id]
+
+
+def _last_position_logits(model, batch):
+    """Run a forward pass and return logits at the final position only.
+
+    Newer transformers versions accept logits_to_keep or num_logits_to_keep,
+    which avoids materialising the full sequence-length logits tensor. With a
+    256k vocabulary that tensor would not fit in memory at native lengths, so
+    the keyword is tried first and the full pass is only a fallback.
+    """
+    for kw in ({"logits_to_keep": 1}, {"num_logits_to_keep": 1}):
+        try:
+            out = model(**batch, return_dict=True, **kw)
+            return out.logits[:, -1, :]
+        except TypeError:
+            continue
+    out = model(**batch, return_dict=True)
+    return out.logits[:, -1, :]
+
+
+def _yes_logit_scores(query: str, candidates: list[dict], model_id: str,
+                      batch_size: int) -> list[float]:
+    """Score query-candidate pairs with a causal-LM reranker.
+
+    Builds the official BAAI prompt layout. The packed input is the bos
+    token, the prefixed query, a separator, and the prefixed passage with
+    passage-side truncation, followed by the instruction prompt. The score
+    of each pair is the logit of the Yes token at the last position. The
+    passage budget defaults to 4096 tokens, which covers the longest pasal
+    in the corpus, and VECTOR_RERANKER_MAX_LENGTH overrides it.
+
+    Args:
+        query: Legal question in Indonesian.
+        candidates: Candidate dicts with at least a "text" key.
+        model_id: HuggingFace model id of the causal-LM reranker.
+        batch_size: Number of pairs scored per forward pass.
+
+    Returns:
+        One float score per candidate, in input order.
+    """
+    import torch
+    model, tokenizer, yes_loc = _get_llm_reranker(model_id)
+    max_length = RERANKER_MAX_LENGTH or 4096
+    prompt_ids = tokenizer(_GEMMA_INSTRUCTION, add_special_tokens=False)["input_ids"]
+    sep_ids = tokenizer("\n", add_special_tokens=False)["input_ids"]
+    query_ids = tokenizer(
+        f"A: {query}", add_special_tokens=False,
+        truncation=True, max_length=max_length * 3 // 4)["input_ids"]
+    items = []
+    for c in candidates:
+        passage_ids = tokenizer(
+            f"B: {c['text']}", add_special_tokens=False,
+            truncation=True, max_length=max_length)["input_ids"]
+        item = tokenizer.prepare_for_model(
+            [tokenizer.bos_token_id] + query_ids,
+            sep_ids + passage_ids,
+            truncation="only_second",
+            max_length=max_length,
+            padding=False,
+            return_attention_mask=False,
+            return_token_type_ids=False,
+            add_special_tokens=False,
+        )
+        item["input_ids"] = item["input_ids"] + sep_ids + prompt_ids
+        item["attention_mask"] = [1] * len(item["input_ids"])
+        items.append(item)
+    device = next(model.parameters()).device
+    scores: list[float] = []
+    with torch.no_grad():
+        for start in range(0, len(items), batch_size):
+            batch = tokenizer.pad(
+                items[start:start + batch_size], padding=True,
+                pad_to_multiple_of=8, return_tensors="pt").to(device)
+            logits = _last_position_logits(model, batch)
+            scores.extend(logits[:, yes_loc].float().cpu().tolist())
+    return scores
+
+
 def rerank(query: str, candidates: list[dict], reranker_name: str,
            top_k: int = 10) -> list[dict]:
     """Rerank candidates and return top_k by descending score.
@@ -108,21 +222,24 @@ def rerank(query: str, candidates: list[dict], reranker_name: str,
             out.append(c_copy)
         return out
 
+    batch_size = RERANKER_BATCH_SIZE or cfg.get("predict_batch_size", 32)
     if cfg["backend"] == "cross_encoder":
         ce = _get_cross_encoder(cfg["model_id"])
         if _is_qwen_model(cfg["model_id"]):
             pairs = _format_qwen_pairs(query, candidates)
         else:
             pairs = [(query, c["text"]) for c in candidates]
-        batch_size = RERANKER_BATCH_SIZE or cfg.get("predict_batch_size", 32)
         scores = ce.predict(pairs, batch_size=batch_size, show_progress_bar=False)
-        scored = [(float(s), c) for s, c in zip(scores, candidates)]
-        scored.sort(key=lambda x: x[0], reverse=True)
-        out = []
-        for s, c in scored[:top_k]:
-            c_copy = dict(c)
-            c_copy["rerank_score"] = s
-            out.append(c_copy)
-        return out
+    elif cfg["backend"] == "llm_yes_logit":
+        scores = _yes_logit_scores(query, candidates, cfg["model_id"], batch_size)
+    else:
+        raise ValueError(f"Unsupported reranker backend: {cfg['backend']!r}")
 
-    raise ValueError(f"Unsupported reranker backend: {cfg['backend']!r}")
+    scored = [(float(s), c) for s, c in zip(scores, candidates)]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    out = []
+    for s, c in scored[:top_k]:
+        c_copy = dict(c)
+        c_copy["rerank_score"] = s
+        out.append(c_copy)
+    return out
