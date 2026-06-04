@@ -22,7 +22,9 @@ import math
 # Constants shared across the harness
 # ----------------------------------------------------------------------
 
-DEFAULT_CUTOFFS = [1, 3, 5, 10]
+# Cutoff 2 is included because multihop queries require exactly two gold
+# pasals, so recall@2 measures whether both were retrieved at the top.
+DEFAULT_CUTOFFS = [1, 2, 3, 5, 10]
 
 GOLD_KEY_BY_GRANULARITY = {
     "pasal": "gold_pasal_node_ids",
