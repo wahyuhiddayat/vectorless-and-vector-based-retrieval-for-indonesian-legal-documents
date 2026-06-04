@@ -220,8 +220,13 @@ def main() -> int:
     print("\n" + "#" * 72)
     print("# RERANKER UPGRADE, bge-reranker-v2-m3 to bge-reranker-v2-gemma")
     print("#" * 72)
+    # v2-gemma must run in fp32. Its bf16 attention kernel triggers a CUDA
+    # illegal-memory-access on the eval GPU, while fp32 is stable. The bf16
+    # v2-m3 baseline differs from fp32 only in the 3rd-4th decimal, far below
+    # the 0.003 acceptance threshold, so the comparison stays valid.
     label_upgrade = f"run41_v2gemma_topn{winner_top_n}_ef{winner_ef}"
-    env_upgrade = {**state, "VECTOR_RERANKER": "bge-reranker-v2-gemma"}
+    env_upgrade = {**state, "VECTOR_RERANKER": "bge-reranker-v2-gemma",
+                   "VECTOR_RERANKER_FP32": "1"}
     run_dir_upgrade = run_eval(label_upgrade, "bge-reranker-v2-gemma", env_upgrade, args.qdrant_path)
     gemma_metrics = read_metrics(run_dir_upgrade)
 
@@ -234,6 +239,8 @@ def main() -> int:
         final_reranker = "bge-reranker-v2-gemma"
         baseline_for_qe = gemma_metrics
         state["VECTOR_RERANKER"] = "bge-reranker-v2-gemma"
+        # Carry fp32 forward so the QE step also runs gemma in fp32.
+        state["VECTOR_RERANKER_FP32"] = "1"
         print(f"  Decision, UPGRADE ACCEPTED (lift exceeds +{INTERVENTION_THRESHOLD})")
     else:
         final_reranker = "bge-reranker-v2-m3"
