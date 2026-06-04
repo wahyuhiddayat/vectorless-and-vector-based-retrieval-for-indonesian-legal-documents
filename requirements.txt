@@ -19,7 +19,10 @@ pymupdf>=1.26.0
 # Vector RAG (retrieval)
 qdrant-client
 rank-bm25
-sentence-transformers>=3.0.0
+sentence-transformers>=3.0.0,<5.0
+# transformers 5.x changed gemma internals and breaks the causal-LM reranker
+# (bge-reranker-v2-gemma) with a CUDA illegal-memory-access. Pin to 4.x.
+transformers>=4.44,<5.0
 
 # GT typed-query validation
 Sastrawi>=1.0.1
