@@ -1,0 +1,50 @@
+{
+  "pasal": {
+    "n_docs": 308,
+    "leaf_count": 7271,
+    "mean_leaves_per_doc": 23.6,
+    "mean_text_length": 759,
+    "median_text_length": 498,
+    "p95_text_length": 2224,
+    "p99_text_length": 4485,
+    "max_text_length": 11222,
+    "mean_tree_depth": 2.59,
+    "p95_tree_depth": 4,
+    "max_tree_depth": 5,
+    "mean_branching": 17.7,
+    "p95_branching": 43,
+    "max_branching": 108
+  },
+  "ayat": {
+    "n_docs": 308,
+    "leaf_count": 18205,
+    "mean_leaves_per_doc": 59.1,
+    "mean_text_length": 299,
+    "median_text_length": 196,
+    "p95_text_length": 747,
+    "p99_text_length": 2242,
+    "max_text_length": 11222,
+    "mean_tree_depth": 3.57,
+    "p95_tree_depth": 5,
+    "max_tree_depth": 6,
+    "mean_branching": 29.95,
+    "p95_branching": 80,
+    "max_branching": 193
+  },
+  "rincian": {
+    "n_docs": 308,
+    "leaf_count": 38006,
+    "mean_leaves_per_doc": 123.4,
+    "mean_text_length": 126,
+    "median_text_length": 106,
+    "p95_text_length": 309,
+    "p99_text_length": 450,
+    "max_text_length": 3128,
+    "mean_tree_depth": 4.86,
+    "p95_tree_depth": 6,
+    "max_tree_depth": 7,
+    "mean_branching": 41.31,
+    "p95_branching": 115,
+    "max_branching": 340
+  }
+}
