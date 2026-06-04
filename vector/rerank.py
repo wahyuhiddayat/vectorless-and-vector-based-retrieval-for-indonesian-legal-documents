@@ -164,27 +164,25 @@ def _yes_logit_scores(query: str, candidates: list[dict], model_id: str,
     max_length = RERANKER_MAX_LENGTH or 4096
     prompt_ids = tokenizer(_GEMMA_INSTRUCTION, add_special_tokens=False)["input_ids"]
     sep_ids = tokenizer("\n", add_special_tokens=False)["input_ids"]
+    bos_ids = [tokenizer.bos_token_id] if tokenizer.bos_token_id is not None else []
     query_ids = tokenizer(
         f"A: {query}", add_special_tokens=False,
         truncation=True, max_length=max_length * 3 // 4)["input_ids"]
+    # Build the packed input manually, since tokenizer.prepare_for_model was
+    # removed in transformers 5.x. Layout follows the official BAAI usage,
+    # bos, query, sep, passage, sep, instruction, and only the passage is
+    # truncated so the fixed parts always survive.
+    fixed_len = len(bos_ids) + len(query_ids) + 2 * len(sep_ids) + len(prompt_ids)
+    passage_budget = max(0, max_length - fixed_len)
     items = []
     for c in candidates:
         passage_ids = tokenizer(
-            f"B: {c['text']}", add_special_tokens=False,
-            truncation=True, max_length=max_length)["input_ids"]
-        item = tokenizer.prepare_for_model(
-            [tokenizer.bos_token_id] + query_ids,
-            sep_ids + passage_ids,
-            truncation="only_second",
-            max_length=max_length,
-            padding=False,
-            return_attention_mask=False,
-            return_token_type_ids=False,
-            add_special_tokens=False,
-        )
-        item["input_ids"] = item["input_ids"] + sep_ids + prompt_ids
-        item["attention_mask"] = [1] * len(item["input_ids"])
-        items.append(item)
+            f"B: {c['text']}", add_special_tokens=False)["input_ids"][:passage_budget]
+        input_ids = bos_ids + query_ids + sep_ids + passage_ids + sep_ids + prompt_ids
+        items.append({
+            "input_ids": input_ids,
+            "attention_mask": [1] * len(input_ids),
+        })
     device = next(model.parameters()).device
     scores: list[float] = []
     with torch.no_grad():
