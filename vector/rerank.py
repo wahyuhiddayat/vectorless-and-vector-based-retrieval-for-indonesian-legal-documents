@@ -8,6 +8,8 @@ bge-reranker-v2-gemma, which are scored by the logit of the Yes token at
 the final position, following the official BAAI usage.
 """
 
+import os
+
 from .common import (
     _RERANKER_REGISTRY,
     RERANKER_BATCH_SIZE,
@@ -108,7 +110,10 @@ def _get_llm_reranker(model_id: str):
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         tokenizer.padding_side = "left"
-        kwargs = {}
+        # Force eager attention. The SDPA kernel for this gemma model triggers
+        # a CUDA illegal-memory-access on recent transformers, eager is the
+        # stable fallback. Override with VECTOR_RERANKER_ATTN if needed.
+        kwargs = {"attn_implementation": os.environ.get("VECTOR_RERANKER_ATTN", "eager")}
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             kwargs["torch_dtype"] = torch.float32 if RERANKER_FP32 else torch.bfloat16
