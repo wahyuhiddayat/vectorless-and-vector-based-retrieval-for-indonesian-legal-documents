@@ -85,21 +85,26 @@ def vec_records(gran: str, emb: str, rer: str) -> list[dict]:
 def plot_granularity(out: Path) -> None:
     """Grouped bars, MAP@10 by vectorless method and granularity."""
     methods = ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]
+    # Extra horizontal gap between the lexical, hybrid, and LLM-based pairs
+    # so the three family bands are visible in the figure itself.
+    method_x = [0.0, 1.0, 2.45, 3.45, 4.9, 5.9]
     grans = ["pasal", "ayat", "rincian"]
-    colors = {"pasal": UIBLUE, "ayat": "#7C93BE", "rincian": "#C5CFE2"}
+    colors = {"pasal": UIBLUE, "ayat": "#6E87B7", "rincian": "#C9D3E6"}
 
-    fig, ax = plt.subplots(figsize=(6.3, 2.9))
+    fig, ax = plt.subplots(figsize=(6.3, 3.1))
     width = 0.26
     for gi, gran in enumerate(grans):
         vals = [mean(vl_records(m, gran), "map@10") for m in methods]
-        xs = [i + (gi - 1) * width for i in range(len(methods))]
-        ax.bar(xs, vals, width=width, color=colors[gran], label=gran.capitalize(),
-               edgecolor="white", linewidth=0.4)
-    ax.set_xticks(range(len(methods)))
+        xs = [x + (gi - 1) * width for x in method_x]
+        bars = ax.bar(xs, vals, width=width, color=colors[gran], label=gran.capitalize(),
+                      edgecolor="white", linewidth=0.4)
+        ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
+    ax.set_xticks(method_x)
     ax.set_xticklabels(methods)
     ax.set_ylabel("MAP@10")
-    ax.set_ylim(0, 1.0)
-    ax.legend(frameon=False, ncol=3, loc="upper left")
+    ax.set_ylim(0, 1.12)
+    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
     fig.tight_layout()
     fig.savefig(out / "vl-granularity.pdf")
     plt.close(fig)
@@ -117,50 +122,75 @@ def plot_bytype(out: Path) -> None:
     ]
     types = ["factual", "paraphrased", "multihop"]
     colors = {"factual": UIBLUE, "paraphrased": GRAY, "multihop": UIRED}
+    # Family gaps within the vectorless side and a wider gap before the
+    # vector configuration to separate the two paradigms.
+    config_x = [0.0, 1.45, 2.45, 3.9, 4.9, 6.55]
 
-    fig, ax = plt.subplots(figsize=(6.3, 2.9))
+    fig, ax = plt.subplots(figsize=(6.3, 3.1))
     width = 0.26
     for ti, qt in enumerate(types):
         vals = []
         for _, loader in configs:
             rows = [r for r in loader() if r.get("query_type") == qt]
             vals.append(mean(rows, "map@10"))
-        xs = [i + (ti - 1) * width for i in range(len(configs))]
-        ax.bar(xs, vals, width=width, color=colors[qt], label=qt.capitalize(),
-               edgecolor="white", linewidth=0.4)
-    ax.set_xticks(range(len(configs)))
+        xs = [x + (ti - 1) * width for x in config_x]
+        bars = ax.bar(xs, vals, width=width, color=colors[qt], label=qt.capitalize(),
+                      edgecolor="white", linewidth=0.4)
+        ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
+    ax.set_xticks(config_x)
     ax.set_xticklabels([c for c, _ in configs])
     ax.set_ylabel("MAP@10")
-    ax.set_ylim(0, 1.0)
-    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.16))
+    ax.set_ylim(0, 1.12)
+    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
     fig.tight_layout()
     fig.savefig(out / "bytype.pdf")
     plt.close(fig)
 
 
 def plot_cost(out: Path) -> None:
-    """Scatter, MAP@10 against mean per-query latency on a log axis."""
+    """Scatter, MAP@10 against mean per-query latency on a log axis.
+
+    Vectorless configurations are red circles and vector configurations
+    blue squares. A dashed staircase traces the Pareto frontier, the
+    configurations not beaten on both effectiveness and latency at once.
+    """
     points = []
     for method in ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]:
         rows = vl_records(method, "pasal")
-        points.append((method, mean(rows, "elapsed_s"), mean(rows, "map@10"), UIRED))
+        points.append((method, mean(rows, "elapsed_s"), mean(rows, "map@10"), UIRED, "o"))
     for rer, label in [("none", "vector, no reranker"), ("bge-reranker-v2-m3", "vector + reranker")]:
         rows = vec_records("pasal", "bge-m3", rer)
-        points.append((label, mean(rows, "elapsed_s"), mean(rows, "map@10"), UIBLUE))
+        points.append((label, mean(rows, "elapsed_s"), mean(rows, "map@10"), UIBLUE, "s"))
+
+    # Pareto frontier on (latency, map), lower latency and higher score.
+    frontier = []
+    best = 0.0
+    for name, x, y, *_ in sorted(points, key=lambda p: p[1]):
+        if y > best:
+            frontier.append((x, y))
+            best = y
 
     fig, ax = plt.subplots(figsize=(6.3, 3.4))
+    fx = [p[0] for p in frontier]
+    fy = [p[1] for p in frontier]
+    ax.step(fx, fy, where="post", color="#999999", linewidth=0.9,
+            linestyle="--", zorder=2)
     offsets = {
         "bm25-flat": (0, 9, "center"), "bm25-tree": (0, 9, "center"),
         "hybrid-flat": (-6, 9, "center"), "hybrid-tree": (8, 9, "left"),
-        "llm-flat": (4, -15, "left"), "llm-tree": (-8, -4, "right"),
+        "llm-flat": (4, -16, "left"), "llm-tree": (-9, -5, "right"),
         "vector, no reranker": (0, 9, "center"), "vector + reranker": (0, 9, "center"),
     }
-    for name, x, y, color in points:
-        ax.scatter(x, y, s=42, color=color, zorder=3)
+    for name, x, y, color, marker in points:
+        ax.scatter(x, y, s=58, color=color, marker=marker,
+                   edgecolor="white", linewidth=0.6, zorder=3)
         dx, dy, ha = offsets[name]
         ax.annotate(name, (x, y), textcoords="offset points", xytext=(dx, dy),
                     ha=ha, fontsize=8, color="#333333")
     ax.set_xscale("log")
+    ax.set_xticks([0.1, 1, 10])
+    ax.set_xticklabels(["0.1", "1", "10"])
     ax.set_xlabel("Mean latency per query (s, log scale)")
     ax.set_ylabel("MAP@10")
     ax.set_ylim(0.5, 1.0)

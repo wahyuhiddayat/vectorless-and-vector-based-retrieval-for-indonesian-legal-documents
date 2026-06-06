@@ -133,7 +133,7 @@ def main() -> int:
             print(f"{run_dir}: no records directory, skipping")
             continue
         for combo_path in sorted(records_dir.glob("*.jsonl")):
-            if args.granularity and not combo_path.stem.endswith(f"__{args.granularity}"):
+            if args.granularity and args.granularity not in combo_path.stem.split("__"):
                 continue
             report_combo(combo_path, args.cutoffs, args.focus_k)
     return 0
