@@ -151,43 +151,42 @@ def plot_bytype(out: Path) -> None:
 def plot_cost(out: Path) -> None:
     """Scatter, MAP@10 against mean per-query latency on a log axis.
 
-    Vectorless configurations are red circles and vector configurations
-    blue squares. A dashed staircase traces the Pareto frontier, the
-    configurations not beaten on both effectiveness and latency at once.
+    Vectorless methods are red circles with name labels. Vector
+    configurations are blue markers grouped by reranker, since the
+    reranker rather than the embedding determines their cost.
     """
-    points = []
-    for method in ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]:
-        rows = vl_records(method, "pasal")
-        points.append((method, mean(rows, "elapsed_s"), mean(rows, "map@10"), UIRED, "o"))
-    for rer, label in [("none", "vector, no reranker"), ("bge-reranker-v2-m3", "vector + reranker")]:
-        rows = vec_records("pasal", "bge-m3", rer)
-        points.append((label, mean(rows, "elapsed_s"), mean(rows, "map@10"), UIBLUE, "s"))
-
-    # Pareto frontier on (latency, map), lower latency and higher score.
-    frontier = []
-    best = 0.0
-    for name, x, y, *_ in sorted(points, key=lambda p: p[1]):
-        if y > best:
-            frontier.append((x, y))
-            best = y
-
     fig, ax = plt.subplots(figsize=(6.3, 3.4))
-    fx = [p[0] for p in frontier]
-    fy = [p[1] for p in frontier]
-    ax.step(fx, fy, where="post", color="#999999", linewidth=0.9,
-            linestyle="--", zorder=2)
-    offsets = {
+    vl_offsets = {
         "bm25-flat": (0, 9, "center"), "bm25-tree": (0, 9, "center"),
         "hybrid-flat": (-6, 9, "center"), "hybrid-tree": (8, 9, "left"),
         "llm-flat": (4, -16, "left"), "llm-tree": (-9, -5, "right"),
-        "vector, no reranker": (0, 9, "center"), "vector + reranker": (0, 9, "center"),
     }
-    for name, x, y, color, marker in points:
-        ax.scatter(x, y, s=58, color=color, marker=marker,
-                   edgecolor="white", linewidth=0.6, zorder=3)
-        dx, dy, ha = offsets[name]
-        ax.annotate(name, (x, y), textcoords="offset points", xytext=(dx, dy),
+    first = True
+    for method in ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]:
+        rows = vl_records(method, "pasal")
+        x, y = mean(rows, "elapsed_s"), mean(rows, "map@10")
+        ax.scatter(x, y, s=58, color=UIRED, marker="o", edgecolor="white",
+                   linewidth=0.6, zorder=3, label="Vectorless" if first else None)
+        dx, dy, ha = vl_offsets[method]
+        ax.annotate(method, (x, y), textcoords="offset points", xytext=(dx, dy),
                     ha=ha, fontsize=8, color="#333333")
+        first = False
+
+    embeds = ["bge-m3", "multilingual-e5-large-instruct", "all-nusabert-large-v4"]
+    reranker_classes = [
+        ("none", "Vector, no reranker", "D"),
+        ("bge-reranker-v2-m3", "Vector + BGE v2 M3", "s"),
+        ("qwen3-reranker-0.6b", "Vector + Qwen3 0.6B", "^"),
+    ]
+    for rer_key, rer_label, marker in reranker_classes:
+        first = True
+        for emb in embeds:
+            rows = vec_records("pasal", emb, rer_key)
+            ax.scatter(mean(rows, "elapsed_s"), mean(rows, "map@10"), s=58,
+                       color=UIBLUE, marker=marker, edgecolor="white",
+                       linewidth=0.6, zorder=3, label=rer_label if first else None)
+            first = False
+
     ax.set_xscale("log")
     ax.set_xticks([0.1, 1, 10])
     ax.set_xticklabels(["0.1", "1", "10"])
@@ -195,6 +194,7 @@ def plot_cost(out: Path) -> None:
     ax.set_ylabel("MAP@10")
     ax.set_ylim(0.5, 1.0)
     ax.set_xlim(0.05, 40)
+    ax.legend(frameon=False, loc="lower right", fontsize=8)
     fig.tight_layout()
     fig.savefig(out / "cost-scatter.pdf")
     plt.close(fig)
