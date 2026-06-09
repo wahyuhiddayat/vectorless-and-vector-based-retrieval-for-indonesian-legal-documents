@@ -293,27 +293,30 @@ def indexing_table(out) -> None:
     parse = ic["pasal"]["per_stage"]["parse"]["tokens"]
     repair = ic["pasal"]["per_stage"]["ocr_clean"]["tokens"]
     summ = {g: ic[g]["per_stage"]["summary"]["tokens"] for g in ("pasal", "ayat", "rincian")}
-    total = parse + repair + sum(summ.values())
-    rows = [
-        ("Structural parsing (once)", parse),
-        ("Text repair (once)", repair),
-        (r"Summary annotation, \textit{pasal}", summ["pasal"]),
-        (r"Summary annotation, \textit{ayat}", summ["ayat"]),
-        (r"Summary annotation, \textit{rincian}", summ["rincian"]),
-    ]
+    shared = parse + repair
+    vl_specific = sum(summ.values())
+    total = shared + vl_specific
     out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \footnotesize")
-    out.append(r"  \caption{Indexing token cost by processing stage and granularity.}")
+    out.append(r"  \caption{Indexing token cost by processing stage and granularity, split into the cost shared by both paradigms and the summary annotation used only by the vectorless paradigm.}")
     out.append(r"  \label{tab:appendix-indexing}")
     out.append(r"  \begin{tabular}{@{}l|r@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Processing stage} & \textbf{Tokens} \\")
     out.append(r"    \midrule")
-    for name, tok in rows:
-        out.append("    %s & %s \\\\" % (name, fmt_int(tok)))
+    out.append(r"    \multicolumn{2}{@{}l}{\textit{Shared by both paradigms}} \\")
+    out.append("    \\quad Structural parsing & %s \\\\" % fmt_int(parse))
+    out.append("    \\quad Text repair & %s \\\\" % fmt_int(repair))
+    out.append("    Subtotal, shared & %s \\\\" % fmt_int(shared))
+    out.append(r"    \midrule")
+    out.append(r"    \multicolumn{2}{@{}l}{\textit{Vectorless paradigm only, summary annotation}} \\")
+    out.append("    \\quad \\textit{pasal} & %s \\\\" % fmt_int(summ["pasal"]))
+    out.append("    \\quad \\textit{ayat} & %s \\\\" % fmt_int(summ["ayat"]))
+    out.append("    \\quad \\textit{rincian} & %s \\\\" % fmt_int(summ["rincian"]))
+    out.append("    Subtotal, vectorless-specific & %s \\\\" % fmt_int(vl_specific))
     out.append(r"    \midrule")
     out.append("    \\textbf{Total} & \\textbf{%s} \\\\" % fmt_int(total))
     out.append(r"    \bottomrule")
