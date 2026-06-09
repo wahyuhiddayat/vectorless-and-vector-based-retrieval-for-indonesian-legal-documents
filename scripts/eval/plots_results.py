@@ -144,52 +144,73 @@ def plot_bytype(out: Path) -> None:
 
 
 def plot_cost(out: Path) -> None:
-    """Scatter, MAP@10 against mean per-query latency on a log axis.
+    """Two-panel cost-effectiveness scatter, MAP@10 against latency and tokens.
 
-    Vectorless methods are red circles with name labels. Vector
-    configurations are blue markers grouped by reranker, since the
-    reranker rather than the embedding determines their cost.
+    Effectiveness shares the vertical axis across both panels. The left panel
+    plots mean per-query latency on a log axis, the right panel plots mean
+    per-query LLM tokens on a symlog axis so the token-free configurations sit
+    honestly at zero. Vectorless methods are red circles, vector configurations
+    are blue markers grouped by reranker, since the reranker rather than the
+    embedding determines their cost. Only the token-spending methods are
+    labeled, in the token panel, and the rest are carried by the legend.
     """
-    fig, ax = plt.subplots(figsize=(6.3, 3.4))
-    vl_offsets = {
-        "bm25-flat": (0, 9, "center"), "bm25-tree": (0, 9, "center"),
-        "hybrid-flat": (-6, 9, "center"), "hybrid-tree": (8, 9, "left"),
-        "llm-flat": (4, -16, "left"), "llm-tree": (-9, -5, "right"),
-    }
-    first = True
-    for method in ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]:
-        rows = vl_records(method, "pasal")
-        x, y = mean(rows, "elapsed_s"), mean(rows, "map@10")
-        ax.scatter(x, y, s=58, color=UIRED, marker="o", edgecolor="white",
-                   linewidth=0.6, zorder=3, label="Vectorless" if first else None)
-        dx, dy, ha = vl_offsets[method]
-        ax.annotate(method, (x, y), textcoords="offset points", xytext=(dx, dy),
-                    ha=ha, fontsize=8, color="#333333")
-        first = False
-
+    vl_methods = ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]
     embeds = ["bge-m3", "multilingual-e5-large-instruct", "all-nusabert-large-v4"]
     reranker_classes = [
         ("none", "Vector, no reranker", "D"),
         ("bge-reranker-v2-m3", "Vector + BGE v2 M3", "s"),
         ("qwen3-reranker-0.6b", "Vector + Qwen3 0.6B", "^"),
     ]
-    for rer_key, rer_label, marker in reranker_classes:
-        first = True
-        for emb in embeds:
-            rows = vec_records("pasal", emb, rer_key)
-            ax.scatter(mean(rows, "elapsed_s"), mean(rows, "map@10"), s=58,
-                       color=UIBLUE, marker=marker, edgecolor="white",
-                       linewidth=0.6, zorder=3, label=rer_label if first else None)
-            first = False
+    # Labels go in the token panel, where the four token-spending methods spread out.
+    token_labels = {
+        "hybrid-flat": (0, -15, "center"),
+        "hybrid-tree": (0, 9, "center"),
+        "llm-tree": (10, -15, "left"),
+        "llm-flat": (0, 9, "center"),
+    }
 
-    ax.set_xscale("log")
-    ax.set_xticks([0.1, 1, 10])
-    ax.set_xticklabels(["0.1", "1", "10"])
-    ax.set_xlabel("Mean latency per query (s, log scale)")
-    ax.set_ylabel("MAP@10")
-    ax.set_ylim(0.5, 1.0)
-    ax.set_xlim(0.05, 40)
-    ax.legend(frameon=False, loc="lower right", fontsize=8)
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(6.6, 3.3), sharey=True)
+
+    def draw(ax, xkey, do_labels):
+        first = True
+        for method in vl_methods:
+            rows = vl_records(method, "pasal")
+            x, y = mean(rows, xkey), mean(rows, "map@10")
+            ax.scatter(x, y, s=52, color=UIRED, marker="o", edgecolor="white",
+                       linewidth=0.6, zorder=3, label="Vectorless" if first else None)
+            first = False
+            if do_labels and method in token_labels:
+                dx, dy, ha = token_labels[method]
+                ax.annotate(method, (x, y), textcoords="offset points", xytext=(dx, dy),
+                            ha=ha, fontsize=7.5, color="#333333")
+        for rer_key, rer_label, marker in reranker_classes:
+            first = True
+            for emb in embeds:
+                rows = vec_records("pasal", emb, rer_key)
+                ax.scatter(mean(rows, xkey), mean(rows, "map@10"), s=52,
+                           color=UIBLUE, marker=marker, edgecolor="white",
+                           linewidth=0.6, zorder=3, label=rer_label if first else None)
+                first = False
+
+    draw(axL, "elapsed_s", do_labels=False)
+    draw(axR, "total_tokens", do_labels=True)
+
+    axL.set_xscale("log")
+    axL.set_xticks([0.1, 1, 10])
+    axL.set_xticklabels(["0.1", "1", "10"])
+    axL.set_xlim(0.05, 40)
+    axL.set_xlabel("Mean latency per query (s, log scale)")
+    axL.set_ylabel("MAP@10")
+    axL.set_ylim(0.5, 0.95)
+
+    axR.set_xscale("symlog", linthresh=1000)
+    axR.set_xticks([0, 1e4, 1e5, 1e6])
+    axR.set_xticklabels(["0", "10k", "100k", "1M"])
+    axR.set_xlim(-300, 3e6)
+    axR.set_xlabel("Mean LLM tokens per query")
+
+    handles, labels = axR.get_legend_handles_labels()
+    axR.legend(handles, labels, frameon=False, loc="lower right", fontsize=7)
     fig.tight_layout()
     fig.savefig(out / "cost-scatter.pdf")
     plt.close(fig)
