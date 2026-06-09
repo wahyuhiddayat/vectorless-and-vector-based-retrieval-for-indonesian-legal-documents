@@ -310,6 +310,7 @@ def parse_penjelasan(pages: list[dict], penjelasan_page: int, total_pages: int) 
     # Normalize OCR digits in Pasal numbers ("Pasal l0" → "Pasal 10").
     # In PENJELASAN context, uppercase L is also OCR'd 1 (no valid suffix L).
     def _normalize_penjelasan_pasal(m):
+        """Normalize OCR-garbled digits in a matched Pasal number heading."""
         num = m.group(2).replace('L', '1')
         return m.group(1) + _normalize_ocr_digits(num)
 
@@ -476,8 +477,8 @@ def _clean_penjelasan_text(text: str) -> str:
     text = re.sub(r'\n\s*TAMBAHAN\s+LEMBARAN\s+NEGARA.*$', '', text, flags=re.DOTALL)
     # Page continuation markers: "Pasal 3...", "Huruf b. . ."
     text = re.sub(r'^\w[\w\s]*\.\s*\.\s*\.?\s*$', '', text, flags=re.MULTILINE)
-    # Stacked bare "Pasal" or "Ayat" lines are always OCR column artifacts —
-    # valid occurrences are always followed by a number or "(N)".
+    # Stacked bare "Pasal" or "Ayat" lines are always OCR column artifacts.
+    # Valid occurrences are always followed by a number or "(N)".
     text = re.sub(r'(?:^(?:Pasal|Pasa1|Ayat)\s*\n){2,}', '', text, flags=re.MULTILINE)
     # Trailing "Angka N" section headers from amendment docs: the penjelasan is split at
     # "Pasal X" boundaries, so the "Angka N" label preceding the next Pasal can bleed in.
@@ -756,6 +757,7 @@ def _normalize_flat_structural_text(text: str) -> str:
     inline_words = frozenset(['ayat', 'pasal', 'huruf', 'angka', 'pada', 'di', 'dalam'])
 
     def _maybe_insert_ayat_nl(m: re.Match) -> str:
+        """Insert a newline before an ayat marker unless it follows a cross-reference word."""
         if m.start() == 0:
             return m.group(0)
         window = text[max(0, m.start() - 40): m.start()]
@@ -918,6 +920,7 @@ def _find_fuzzy_markers(
     # number is advisory only (amendment PDFs can legitimately start at a
     # non-1/non-a number when earlier entries are lost in extraction).
     def _validate(seq: list[tuple[int, str, int]]) -> bool:
+        """Return True if the candidate label sequence is consecutive."""
         labels = [s[1] for s in seq]
         if is_numeric:
             try:
@@ -1176,6 +1179,7 @@ def _migrate_stashed_intros(nodes: list[dict]) -> None:
 def ayat_split_leaves(nodes: list[dict]) -> list[dict]:
     """Split each leaf into Ayat nodes when Ayat markers are present."""
     def _split(node: dict):
+        """Split one leaf node into Ayat children when markers are present."""
         return _try_ayat_split(
             text=node["text"],
             parent_id=node["node_id"],
@@ -1345,6 +1349,7 @@ _AMENDMENT_INSTR_PREFIX_RE = re.compile(
 def deep_split_leaves(nodes: list[dict]) -> list[dict]:
     """Split each leaf to the deepest Ayat, Angka, or Huruf structure found."""
     def _split(node: dict):
+        """Split one leaf node to its deepest Ayat, Angka, or Huruf structure."""
         title = node["title"]
         text = node["text"]
 

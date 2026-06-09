@@ -132,7 +132,7 @@ def annotate_doc(doc_id: str, granularity: str = "pasal",
 
     doc = json.loads(path.read_text(encoding="utf-8"))
     if verbose:
-        print(f"Annotating {doc_id} ({granularity}) — {path.stat().st_size // 1024}KB")
+        print(f"Annotating {doc_id} ({granularity}) - {path.stat().st_size // 1024}KB")
 
     t_start = time.time()
     counter = {"leaf": 0, "internal": 0, "skipped": 0, "failed": 0}
@@ -155,7 +155,7 @@ def annotate_doc(doc_id: str, granularity: str = "pasal",
                     counter["failed"] += 1
                     leaf["summary"] = ""  # empty stays as "needs summary" on retry
                     if verbose:
-                        print(f"  [LEAF FAIL] {leaf.get('navigation_path', '')[:80]} — {e!r}")
+                        print(f"  [LEAF FAIL] {leaf.get('navigation_path', '')[:80]} - {e!r}")
                     continue
                 if verbose:
                     print(f"  [LEAF {counter['leaf']:>3}/{len(todo)}] "
@@ -174,7 +174,7 @@ def annotate_doc(doc_id: str, granularity: str = "pasal",
     }
     if verbose:
         suffix = f" failed={counter['failed']}" if counter["failed"] else ""
-        print(f"Done in {elapsed:.1f}s — leaf={counter['leaf']} "
+        print(f"Done in {elapsed:.1f}s - leaf={counter['leaf']} "
               f"internal={counter['internal']} skipped={counter['skipped']}{suffix} | "
               f"{stats['llm_calls']} calls, {stats['total_tokens']:,} tokens")
     return {"elapsed_s": round(elapsed, 2), **counter, **stats}

@@ -452,7 +452,7 @@ def distribute_penjelasan_to_tree(structure: list[dict]) -> None:
                 lead, slices = parent_penj, {}
             # Lead text (often "Cukup jelas." intro) stays on the parent.
             node["penjelasan"] = lead if lead else parent_penj
-            # Child gets its slice only when labels match — do not blind-copy parent.
+            # Child gets its slice only when labels match. Do not blind-copy parent.
             for c in children:
                 key = _child_key(c.get("title", ""))
                 if key and key[1] in slices and slices[key[1]]:
@@ -668,6 +668,7 @@ def _pasals_in_page_range(
     """Return list of 'Pasal N' labels in numeric order for the given range."""
     nums = _pasal_numbers_in_page_range(pages, start, end)
     def _key(x: str) -> tuple[int, str]:
+        """Sort key splitting a pasal number into its integer part and letter suffix."""
         m = re.match(r"(\d+)([A-Z]?)", x)
         return (int(m.group(1)), m.group(2) or "") if m else (10**9, x)
     return [f"Pasal {n}" for n in sorted(nums, key=_key)]
@@ -708,6 +709,7 @@ def _merge_chunk_structures(chunks: list[list[dict]]) -> list[dict]:
     pasal_to_path: dict[str, tuple] = {}
 
     def _container_depth(title: str) -> int | None:
+        """Map a container title to its nesting depth (BAB 0, Bagian 1, Paragraf 2), else None."""
         t = title.strip()
         if t.upper().startswith("BAB "):
             return 0
@@ -725,12 +727,18 @@ def _merge_chunk_structures(chunks: list[list[dict]]) -> list[dict]:
         return t
 
     def _container_key(n: dict) -> str:
+        """Normalized dedup key for a container node, derived from its title."""
         return _norm_title(n.get("title") or "")
 
     current_path: list[str] = []  # display titles
     current_keys: list[str] = []  # normalized dedup keys
 
     def _walk(nodes: list[dict]):
+        """Recurse through chunk nodes, keeping the largest parse of each pasal.
+
+        Tracks the current container path so each pasal is filed under the
+        BAB, Bagian, or Paragraf it appeared in.
+        """
         nonlocal current_path, current_keys
         for n in nodes:
             t = (n.get("title") or "").strip()
@@ -764,6 +772,7 @@ def _merge_chunk_structures(chunks: list[list[dict]]) -> list[dict]:
         _walk(chunk)
 
     def _pasal_key(name: str) -> tuple[int, str]:
+        """Sort key splitting a 'Pasal N' name into its integer part and letter suffix."""
         m = re.match(r"Pasal\s+(\d+)([A-Z]?)", name)
         if not m:
             return (10**9, name)
@@ -814,6 +823,7 @@ def _merge_chunk_structures(chunks: list[list[dict]]) -> list[dict]:
             root_nodes.extend(pasal_best[p] for p in unbucketed)
 
     def _prune(nodes: list[dict]) -> list[dict]:
+        """Drop empty container nodes recursively, keeping pasal-bearing branches."""
         out = []
         for n in nodes:
             if n.get("nodes"):
@@ -829,7 +839,7 @@ def _merge_chunk_structures(chunks: list[list[dict]]) -> list[dict]:
 def _chunk_pages(
     pages: list[dict], pages_per_chunk: int, overlap: int
 ) -> list[tuple[int, int]]:
-    """Page-based chunking — fallback when pasal-aware chunking finds no boundaries."""
+    """Page-based chunking used as a fallback when no pasal boundaries are found."""
     total = len(pages)
     if total <= pages_per_chunk:
         return [(1, total)]
@@ -972,6 +982,7 @@ def _run_llm_parse(inputs: _Inputs, plan: _ChunkPlan, model: str) -> _LLMResult:
     errors: list[str] = []
 
     def _worker(i: int, start: int, end: int):
+        """Parse one page-range chunk in a worker thread, returning (index, llm result)."""
         scoped = format_pdf_pages(inputs.pages, start, end)
         expected = _pasals_in_page_range(inputs.pages, start, end)
         prompt = build_prompt(

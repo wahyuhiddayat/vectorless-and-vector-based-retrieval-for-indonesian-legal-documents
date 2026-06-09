@@ -30,6 +30,7 @@ DROP_VERDICTS = {"MAJOR", "FAIL", "ERROR"}
 
 
 def _load_registry() -> dict:
+    """Load the scrape registry, returning an empty dict when it is absent."""
     if not REGISTRY_PATH.exists():
         return {}
     with open(REGISTRY_PATH, encoding="utf-8") as f:
@@ -46,6 +47,7 @@ def _load_judge() -> dict:
 
 
 def _index_files(doc_id: str, category: str) -> dict[str, bool]:
+    """Report, per granularity, whether the indexed JSON for this doc exists."""
     return {
         gran: (path / category / f"{doc_id}.json").exists()
         for gran, path in INDEX_DIRS.items()
@@ -53,10 +55,12 @@ def _index_files(doc_id: str, category: str) -> dict[str, bool]:
 
 
 def _raw_pdf_path(category: str, doc_id: str) -> Path:
+    """Path to the scraped source PDF for one document."""
     return RAW_DIR / category / "pdfs" / f"{doc_id}.pdf"
 
 
 def _raw_metadata_paths(category: str, doc_id: str) -> list[Path]:
+    """All scraped metadata files for one document, matching exact or suffixed stems."""
     md_dir = RAW_DIR / category / "metadata"
     if not md_dir.exists():
         return []
@@ -152,6 +156,7 @@ def build_status() -> dict:
 
 
 def write_status(status: dict) -> None:
+    """Write the corpus status report to STATUS_PATH as indented JSON."""
     STATUS_PATH.write_text(
         json.dumps(status, indent=2, ensure_ascii=False), encoding="utf-8"
     )

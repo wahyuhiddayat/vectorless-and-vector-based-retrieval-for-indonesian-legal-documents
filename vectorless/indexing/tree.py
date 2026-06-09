@@ -175,6 +175,7 @@ def backfill_page_indices(
     page_text = {p["page_num"]: p.get("raw_text", "") for p in pages}
 
     def _find_title_page(title: str) -> int | None:
+        """Return the first PDF page whose text contains the title prefix, or None."""
         if not title:
             return None
         needle_norm = re.sub(r"\s+", " ", title.strip())
@@ -185,6 +186,10 @@ def backfill_page_indices(
         return None
 
     def _assign(node: dict, default_start: int = 1, default_end: int = doc_total_pages) -> None:
+        """Assign page ranges to a node and its children, recursing depth-first.
+
+        A child's end defaults to one page before the next sibling starts.
+        """
         title = node.get("title", "")
         start = _find_title_page(title) or default_start
         node["start_index"] = start

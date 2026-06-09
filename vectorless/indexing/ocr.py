@@ -28,7 +28,7 @@ INDEX_PASAL = Path("data/index_pasal")
 LEN_MIN_RATIO = 0.85
 LEN_MAX_RATIO = 1.15
 
-# Numeric/structural markers that must survive the clean (rough — preserves count).
+# Numeric/structural markers that must survive the clean (rough, preserves count).
 _MARKER_RE = re.compile(r"\((?:\d+|[a-z])\)|^\s*[a-z0-9]+\.\s+", re.MULTILINE)
 
 
@@ -120,7 +120,7 @@ def clean_doc(doc_id: str, force: bool = False, verbose: bool = True) -> dict:
 
     doc = json.loads(path.read_text(encoding="utf-8"))
     if verbose:
-        print(f"Cleaning OCR for {doc_id} — {path.stat().st_size // 1024}KB")
+        print(f"Cleaning OCR for {doc_id} - {path.stat().st_size // 1024}KB")
 
     counter = {"cleaned": 0, "skipped": 0, "rejected": 0, "fixes_total": 0}
     usage_acc = {"input_tokens": 0, "output_tokens": 0, "calls": 0}
@@ -142,13 +142,13 @@ def clean_doc(doc_id: str, force: bool = False, verbose: bool = True) -> dict:
                     counter["rejected"] += 1
                     leaf["ocr_cleaned"] = "error"
                     if verbose:
-                        print(f"  [ERR ] {leaf.get('navigation_path', '')[:80]} — {e!r}")
+                        print(f"  [ERR ] {leaf.get('navigation_path', '')[:80]} - {e!r}")
                     continue
                 if reject:
                     counter["rejected"] += 1
                     leaf["ocr_cleaned"] = "skipped_validation"
                     if verbose:
-                        print(f"  [REJ ] {leaf.get('navigation_path', '')[:80]} — {reject}")
+                        print(f"  [REJ ] {leaf.get('navigation_path', '')[:80]} - {reject}")
                 else:
                     leaf["text"] = cleaned
                     leaf["ocr_cleaned"] = True
@@ -163,7 +163,7 @@ def clean_doc(doc_id: str, force: bool = False, verbose: bool = True) -> dict:
     elapsed = time.time() - t_start
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     if verbose:
-        print(f"Done in {elapsed:.1f}s — cleaned={counter['cleaned']} "
+        print(f"Done in {elapsed:.1f}s - cleaned={counter['cleaned']} "
               f"skipped={counter['skipped']} rejected={counter['rejected']} "
               f"fixes={counter['fixes_total']} | "
               f"{usage_acc['calls']} calls, "

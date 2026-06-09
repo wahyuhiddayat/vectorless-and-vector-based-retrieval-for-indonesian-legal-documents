@@ -455,6 +455,7 @@ def verify_doc(doc: dict, granularity: str = "pasal") -> dict:
 
     all_ids = []
     def collect_ids(nodes):
+        """Gather every node_id in the subtree into all_ids, depth-first."""
         for n in nodes:
             all_ids.append(n.get("node_id"))
             if "nodes" in n:
