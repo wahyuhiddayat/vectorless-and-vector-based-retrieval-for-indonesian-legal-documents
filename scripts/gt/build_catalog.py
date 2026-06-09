@@ -42,6 +42,10 @@ def build_gt_catalog(
     gt_path: Path = DEFAULT_GT_PATH,
     dry_run: bool = False,
 ) -> None:
+    """Write a catalog_gt.json per granularity, restricted to the GT doc ids.
+
+    With dry_run set, report what would change without writing any file.
+    """
     if not gt_path.exists():
         raise FileNotFoundError(f"ground_truth.json not found: {gt_path}")
 
@@ -76,6 +80,7 @@ def build_gt_catalog(
 
 
 def main() -> int:
+    """Parse arguments and build the per-granularity GT catalogs."""
     ap = argparse.ArgumentParser(
         description="Generate catalog_gt.json for each granularity from ground_truth.json"
     )

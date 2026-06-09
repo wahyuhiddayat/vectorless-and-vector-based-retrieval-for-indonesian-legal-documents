@@ -205,6 +205,7 @@ def search_queries(data: dict, keyword: str) -> dict:
 def export_json(data: dict, output_file: str = None):
     """Export testset to JSON format."""
     def _convert(value):
+        """Recursively make a value JSON-serializable by sorting any sets into lists."""
         if isinstance(value, set):
             return sorted(value)
         if isinstance(value, dict):
@@ -223,6 +224,7 @@ def export_json(data: dict, output_file: str = None):
 
 
 def main():
+    """Load validated_testset.pkl and print stats, a preview, or a full dump."""
     ap = argparse.ArgumentParser(
         description="Load and inspect validated_testset.pkl",
         formatter_class=argparse.RawDescriptionHelpFormatter,

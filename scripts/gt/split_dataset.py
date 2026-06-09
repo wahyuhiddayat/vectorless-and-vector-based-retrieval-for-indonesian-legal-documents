@@ -163,6 +163,7 @@ def global_rebalance(per_cell: list[dict], targets: dict[str, int]) -> None:
     the cell's least-preferred), then by cell_key for deterministic tie-break.
     """
     def totals() -> dict[str, int]:
+        """Return the current per-split query count summed across all cells."""
         out = {s: 0 for s in SPLIT_NAMES}
         for entry in per_cell:
             for s in SPLIT_NAMES:

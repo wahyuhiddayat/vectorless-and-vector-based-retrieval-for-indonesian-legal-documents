@@ -42,6 +42,7 @@ VECTOR_RUN = "stage1_vector/run29_20260526_vector_dev_357q_full"
 
 
 def setup_style() -> None:
+    """Apply the shared matplotlib style used for every thesis figure."""
     plt.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
@@ -57,6 +58,7 @@ def setup_style() -> None:
 
 
 def load_records(rel: str) -> list[dict]:
+    """Load a records JSONL file relative to the eval runs directory."""
     path = RUNS / rel
     rows = []
     with open(path, encoding="utf-8") as f:
@@ -66,10 +68,16 @@ def load_records(rel: str) -> list[dict]:
 
 
 def mean(rows: list[dict], key: str) -> float:
+    """Mean of one metric over records, treating missing values as zero."""
     return sum((r.get(key) or 0) for r in rows) / len(rows)
 
 
 def vl_records(method: str, gran: str) -> list[dict]:
+    """Load vectorless records for one method and granularity.
+
+    llm-flat runs are stored per granularity, so they resolve to a separate
+    run path from the other methods.
+    """
     if method == "llm-flat":
         rel = f"{LLM_FLAT_RUNS[gran]}/records/llm-flat__{gran}.jsonl"
     else:
@@ -78,6 +86,7 @@ def vl_records(method: str, gran: str) -> list[dict]:
 
 
 def vec_records(gran: str, emb: str, rer: str) -> list[dict]:
+    """Load vector records for one granularity, embedding, and reranker combination."""
     rel = f"{VECTOR_RUN}/records/vector-dense__{gran}__{emb}__{rer}.jsonl"
     return load_records(rel)
 
@@ -172,6 +181,7 @@ def plot_cost(out: Path) -> None:
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(6.6, 3.3), sharey=True)
 
     def draw(ax, xkey, do_labels):
+        """Plot one cost-versus-MAP@10 panel on ax, using xkey as the x-axis metric."""
         first = True
         for method in vl_methods:
             rows = vl_records(method, "pasal")
@@ -265,6 +275,7 @@ def plot_tuning(out: Path) -> None:
 
 
 def main() -> int:
+    """Render every thesis figure into the --out directory."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(REPO_ROOT.parents[1] / "laporan-skripsi" / "assets" / "figures" / "bab4"))
     args = ap.parse_args()

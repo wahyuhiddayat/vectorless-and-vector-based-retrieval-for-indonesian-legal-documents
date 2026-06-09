@@ -54,14 +54,17 @@ QUERY_TYPES = ("factual", "paraphrased", "multihop")
 
 
 def _basename(doc_id: str, query_type: str) -> str:
+    """Build the '<doc_id>__<query_type>' stem shared by GT artifact filenames."""
     return f"{doc_id}__{query_type}"
 
 
 def _raw_path(doc_id: str, query_type: str) -> Path:
+    """Path to the raw GT file for a doc_id and query type."""
     return RAW_DIR / doc_category(doc_id) / f"{_basename(doc_id, query_type)}.json"
 
 
 def _validate_path(doc_id: str, query_type: str) -> Path:
+    """Path to the temp validation report for a doc_id and query type."""
     return TMP_DIR / f"validate_{_basename(doc_id, query_type)}.txt"
 
 

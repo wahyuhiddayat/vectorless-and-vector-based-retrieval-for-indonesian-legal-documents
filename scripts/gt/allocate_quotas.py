@@ -41,6 +41,7 @@ TYPE_PRIORITY = ["factual", "paraphrased", "multihop"]
 
 
 def load_selected_docs(category: str) -> list[str]:
+    """Return the selected doc_ids for one category from the GT selection file."""
     if not SELECTION_FILE.exists():
         raise SystemExit(f"{SELECTION_FILE} not found, run scripts/gt/select_gt_docs.py first")
     with open(SELECTION_FILE, encoding="utf-8") as f:
@@ -124,6 +125,7 @@ def render_commands(doc_ids: list[str], allocation: list[dict[str, int]]) -> lis
 
 
 def main() -> None:
+    """Allocate per-doc query-type quotas for a category and write the result."""
     ap = argparse.ArgumentParser(description="Reproducible per-doc query-type allocation")
     ap.add_argument("--category", required=True, help="Category name as in gt_doc_selection.json (e.g., UU)")
     ap.add_argument("--total", type=int, default=None,

@@ -52,6 +52,7 @@ def load_json_array(path: Path) -> list[dict]:
 
 
 def main() -> None:
+    """Merge multipart GT raw files for one document into a single raw JSON."""
     ap = argparse.ArgumentParser(description="Merge multipart GT raw files into one document-level raw JSON")
     ap.add_argument("doc_id", type=str, help="Document ID, e.g. permenaker-13-2025")
     ap.add_argument("--type", "-t", type=str, default="factual",

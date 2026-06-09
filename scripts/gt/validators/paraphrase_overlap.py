@@ -61,6 +61,7 @@ def jaccard(a: set[str], b: set[str]) -> float:
 
 
 def find_doc_path(doc_id: str) -> Path | None:
+    """Locate the indexed JSON for a doc_id under DATA_INDEX, or None if absent."""
     for path in DATA_INDEX.rglob("*.json"):
         if path.stem == doc_id and path.name != "catalog.json":
             return path
@@ -72,6 +73,7 @@ def collect_leaf_text_map(doc: dict) -> dict[str, str]:
     out: dict[str, str] = {}
 
     def _walk(nodes: list[dict]) -> None:
+        """Collect text from every leaf node into out, keyed by node_id."""
         for node in nodes:
             if "nodes" in node and node["nodes"]:
                 _walk(node["nodes"])
@@ -125,6 +127,7 @@ def validate_file(path: Path, threshold: float = DEFAULT_THRESHOLD, stem: bool =
 
 
 def main() -> None:
+    """Run the paraphrase lexical-overlap validator on one raw GT file."""
     ap = argparse.ArgumentParser(description="Paraphrase lexical-overlap validator")
     ap.add_argument("path", type=str, help="Path to raw GT JSON file")
     ap.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,

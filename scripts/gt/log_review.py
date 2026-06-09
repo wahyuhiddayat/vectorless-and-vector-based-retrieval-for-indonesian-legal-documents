@@ -41,6 +41,7 @@ VALID_VERDICTS = {"c": "correct", "w": "wrong", "b": "borderline", "s": "skipped
 
 
 def _basename(doc_id: str, query_type: str) -> str:
+    """Build the '<doc_id>__<query_type>' stem for a raw GT filename."""
     return f"{doc_id}__{query_type}"
 
 
@@ -133,6 +134,7 @@ def review_doc(doc_id: str, query_type: str, resume: bool) -> dict:
     leaf_map_cache: dict[str, dict[str, dict]] = {}
 
     def _leaf_map(did: str) -> dict[str, dict]:
+        """Return the leaf metadata map for a doc, caching it across calls."""
         if did not in leaf_map_cache:
             leaf_map_cache[did] = get_leaf_meta_map(did)
         return leaf_map_cache[did]

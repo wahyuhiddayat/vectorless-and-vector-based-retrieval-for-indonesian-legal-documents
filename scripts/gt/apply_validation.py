@@ -48,6 +48,7 @@ SEPARATOR = "---CLEANED---"
 
 
 def _basename(doc_id: str, query_type: str) -> str:
+    """Build the '<doc_id>__<query_type>' stem for a raw GT filename."""
     return f"{doc_id}__{query_type}"
 
 

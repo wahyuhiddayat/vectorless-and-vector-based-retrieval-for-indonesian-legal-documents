@@ -45,10 +45,12 @@ QUERY_TYPES = ("factual", "paraphrased", "multihop")
 
 
 def _raw_filename(doc_id: str, query_type: str) -> str:
+    """Build the raw GT JSON filename for a doc_id and query type."""
     return f"{doc_id}__{query_type}.json"
 
 
 def _raw_path(doc_id: str, query_type: str = "factual") -> Path:
+    """Path to the raw GT file for a doc_id and query type."""
     return RAW_DIR / doc_category(doc_id) / _raw_filename(doc_id, query_type)
 
 

@@ -108,6 +108,7 @@ def get_leaf_meta_map(doc_id: str) -> dict[str, dict]:
     leaf_map: dict[str, dict] = {}
 
     def _walk(nodes: list[dict], parent_path: str = "") -> None:
+        """Index every leaf into leaf_map, deriving a navigation path when one is missing."""
         for node in nodes:
             node_path = node.get("navigation_path", "").strip()
             if not node_path and parent_path and node.get("title"):

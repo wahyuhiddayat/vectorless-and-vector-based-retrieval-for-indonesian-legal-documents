@@ -70,6 +70,7 @@ def metric_value(record: dict, metric: str) -> float:
 
 
 def gold_pairs(record: dict) -> list[tuple[str, str]]:
+    """Pair each gold doc id with its relevant node id for this query."""
     return list(zip(record.get("gold_doc_ids", []), record.get("relevant_node_ids", [])))
 
 
@@ -80,6 +81,7 @@ def anchors_found(record: dict) -> int:
 
 
 def failure_breakdown(records: dict[str, dict], subset: list[str], metric: str) -> dict:
+    """Count subset failures by how many of the two gold anchors were retrieved."""
     failures = [q for q in subset if metric_value(records[q], metric) < 1.0]
     counts = {2: 0, 1: 0, 0: 0}
     for qid in failures:
@@ -93,6 +95,7 @@ def failure_breakdown(records: dict[str, dict], subset: list[str], metric: str) 
 
 
 def main() -> int:
+    """Contrast the two-anchor multihop subset against its complement and test significance."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run-a", default=DEFAULT_RUN_A, help="run directory of side a")
     parser.add_argument("--run-b", default=DEFAULT_RUN_B, help="run directory of side b")
