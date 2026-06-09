@@ -27,6 +27,7 @@ BACKUP_DIRS = {
 
 
 def main() -> None:
+    """Restore index files from the chosen backup dir, or list available backups."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--from", dest="source", choices=list(BACKUP_DIRS), required=True,
                     help="Backup dir to restore from")

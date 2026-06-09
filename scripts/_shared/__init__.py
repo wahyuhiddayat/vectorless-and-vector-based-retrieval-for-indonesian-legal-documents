@@ -1,4 +1,4 @@
-"""Shared utilities for scripts/ — path resolution, registry, catalog loading.
+"""Shared utilities for scripts/, path resolution, registry, and catalog loading.
 
 Extracted from duplicated code across gt/, eval/, and parser/ scripts.
 Import via:

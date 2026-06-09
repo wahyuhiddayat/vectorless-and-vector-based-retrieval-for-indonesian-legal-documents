@@ -428,6 +428,7 @@ def _siblings_hint_multidoc(picked_docs: dict[str, dict], doc_id: str,
     all_ids: list[str] = []
 
     def _walk(nodes):
+        """Collect every node_id in the subtree into all_ids, depth-first."""
         for n in nodes:
             nid = n.get("node_id")
             if nid:

@@ -148,7 +148,7 @@ def build_index(
         doc_id = doc_meta["doc_id"]
         matches = list(source_dir.glob(f"*/{doc_id}.json"))
         if not matches:
-            print(f"  SKIP: {doc_id} — index file not found")
+            print(f"  SKIP: {doc_id} - index file not found")
             continue
         doc_path = matches[0]
 

@@ -43,6 +43,7 @@ def node_corpus(doc: dict) -> tuple[list[list[str]], list[str]]:
     leaves: list[dict] = []
 
     def walk(nodes):
+        """Collect every leaf node in the subtree into leaves."""
         for n in nodes:
             if n.get("nodes"):
                 walk(n["nodes"])

@@ -19,6 +19,7 @@ from vectorless.indexing.targets import resolve_targets  # noqa: E402
 
 
 def main() -> None:
+    """Annotate per-node summaries across the resolved target docs and report totals."""
     ap = argparse.ArgumentParser(description="Annotate per-node summary fields")
     ap.add_argument("--doc-id", action="append", dest="doc_ids", default=[],
                     help="Doc to annotate (repeatable)")

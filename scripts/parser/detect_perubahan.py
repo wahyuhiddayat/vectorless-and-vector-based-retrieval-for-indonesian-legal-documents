@@ -3,7 +3,7 @@
 Scans all indexed docs and flags those whose title matches the amendment
 pattern "Perubahan [Ke-N] atas <UU|Peraturan> ...". Useful for splitting
 the re-index backlog into "light" (non-amendment) vs "complex" (amendment)
-batches — amendment docs need Option A LLM-first generation, while
+batches. Amendment docs need Option A LLM-first generation, while
 non-amendment docs can go through the standard llm_fix.py flow.
 
 Output: writes `data/amendment_docs.json` with split lists, plus prints
@@ -51,6 +51,7 @@ def load_quality_report() -> dict[str, str]:
 
 
 def main() -> None:
+    """Flag amendment docs by title, write the split lists, and print a summary."""
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--non-ok-only",
@@ -89,6 +90,7 @@ def main() -> None:
     print()
 
     def _summary(bucket: list[dict], label: str) -> None:
+        """Print a status-count summary for one bucket of docs."""
         if not bucket:
             return
         counts: dict[str, int] = {}

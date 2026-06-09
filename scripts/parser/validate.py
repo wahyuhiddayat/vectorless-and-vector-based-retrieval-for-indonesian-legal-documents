@@ -1,16 +1,16 @@
 """Validate parser output against raw PDF for all indexed documents.
 
-Pure regex-based validation with four metrics per document:
-    1. completeness  — actual_pasal_count / expected_pasal_count (from raw PDF)
-    2. monotonic     — pasal numbers appear in ascending order
-    3. gap_count     — number of missing pasals in the sequence
-    4. bleed_count   — leaf nodes whose text contains an embedded Pasal heading
+Pure regex-based validation with four metrics per document.
+    1. completeness, actual_pasal_count / expected_pasal_count (from raw PDF)
+    2. monotonic, pasal numbers appear in ascending order
+    3. gap_count, number of missing pasals in the sequence
+    4. bleed_count, leaf nodes whose text contains an embedded Pasal heading
 
 Amendment documents (is_perubahan=True) skip monotonic/gap checks since the
 underlying legal structure intentionally uses scattered pasal numbers.
 
 Output:
-    data/parser_quality_report.json  — machine-readable per-doc report
+    data/parser_quality_report.json, machine-readable per-doc report
     Console summary table
 
 Usage:
@@ -84,6 +84,7 @@ def extract_pasal_info(index_data: dict) -> tuple[list[str], list[tuple[str, str
     empty_pasals: list[tuple[str, str]] = []
 
     def walk(nodes: list[dict], in_angka_ancestor: bool = False) -> None:
+        """Recurse the tree, recording undersplit leaves and empty pasals."""
         for node in nodes:
             title = node.get("title", "")
             is_angka = title.startswith("Angka ") or in_angka_ancestor

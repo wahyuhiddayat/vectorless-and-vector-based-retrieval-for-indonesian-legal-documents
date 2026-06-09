@@ -29,6 +29,7 @@ from vectorless.indexing.corpus_status import (  # noqa: E402
 
 
 def _print_summary(status: dict, actions: dict | None = None) -> None:
+    """Print the per-category corpus snapshot table to stdout."""
     print(f"corpus snapshot at {status['generated_at']}")
     print()
     cols = ["total", "raw", "registry", "indexed", "judged", "eligible_gt",
@@ -56,6 +57,7 @@ def _print_summary(status: dict, actions: dict | None = None) -> None:
 
 
 def main() -> None:
+    """Compute the corpus status snapshot, print it, and write it to disk."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--reconcile", action="store_true",
                     help="Drop ineligible doc artifacts (raw, registry, index, judge).")

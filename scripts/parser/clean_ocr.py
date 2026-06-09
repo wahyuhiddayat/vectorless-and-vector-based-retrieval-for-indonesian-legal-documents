@@ -18,6 +18,7 @@ from vectorless.indexing.targets import resolve_targets  # noqa: E402
 
 
 def main() -> None:
+    """Clean OCR garbles in the resolved target docs."""
     ap = argparse.ArgumentParser(description="Clean OCR garbles in pasal leaves")
     ap.add_argument("--doc-id", action="append", dest="doc_ids", default=[])
     ap.add_argument("--category", help="Process every doc in this jenis_folder")

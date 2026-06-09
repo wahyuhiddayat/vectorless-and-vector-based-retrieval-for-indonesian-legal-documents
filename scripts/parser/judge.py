@@ -20,6 +20,7 @@ from vectorless.models import JUDGE_MODEL  # noqa: E402
 
 
 def main() -> None:
+    """Run the parse-quality judge over the resolved target docs."""
     ap = argparse.ArgumentParser(description="Gemini-based judge for parsed index quality")
     ap.add_argument("--doc-id", action="append", dest="doc_ids", default=[])
     ap.add_argument("--category", help="Judge every doc in this jenis_folder")

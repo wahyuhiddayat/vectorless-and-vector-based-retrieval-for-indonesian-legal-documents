@@ -23,6 +23,7 @@ def analyze_granularity(granularity: str) -> dict:
             continue
 
         def walk(nodes):
+            """Yield the text length of every leaf node in the subtree."""
             for n in nodes or []:
                 if n.get("nodes"):
                     yield from walk(n["nodes"])

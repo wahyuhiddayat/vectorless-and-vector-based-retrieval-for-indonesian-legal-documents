@@ -3,8 +3,8 @@
 For each leaf in ayat and rincian indexes, use the same fuzzy-marker
 sequence detector that the re-split pipeline uses. If the detector finds
 a valid consecutive sequence (e.g. ayat (1)(2)(3) or huruf a.b.c.) in a
-leaf's text, that leaf should have split but didn't — re-split bug or
-novel pattern the splitter missed.
+leaf's text, that leaf should have split but didn't. The cause is either a
+re-split bug or a novel pattern the splitter missed.
 
 Reuses vectorless.indexing.parser._find_fuzzy_markers so the suspect
 criteria exactly matches the actual splitter logic. Zero cost (regex).
@@ -43,6 +43,7 @@ SUSPECT_KINDS = {
 
 
 def _iter_leaves(nodes: list[dict]):
+    """Yield every leaf node in the tree, depth-first."""
     for n in nodes:
         if n.get("nodes"):
             yield from _iter_leaves(n["nodes"])
@@ -72,12 +73,14 @@ def _find_leaf_suspect(leaf: dict, kinds: list[tuple[str, str]]) -> dict | None:
 
 
 def _find_doc_path(doc_id: str, granularity: str) -> Path | None:
+    """Locate the indexed JSON for a doc at one granularity, or None if absent."""
     for p in INDEX_DIR[granularity].glob(f"*/{doc_id}.json"):
         return p
     return None
 
 
 def check_doc(doc_id: str) -> dict:
+    """Scan one doc across all granularities and report suspect unsplit leaves."""
     report: dict = {"doc_id": doc_id}
     total_suspects = 0
 
@@ -122,6 +125,7 @@ def check_doc(doc_id: str) -> dict:
 
 
 def main() -> None:
+    """Run the granularity sequence scan over the resolved target docs."""
     ap = argparse.ArgumentParser(description="Granularity validation via sequence scan")
     ap.add_argument("--doc-id", action="append", dest="doc_ids", default=[])
     ap.add_argument("--doc-ids", dest="doc_ids_csv", default="")

@@ -21,6 +21,7 @@ from vectorless.indexing.targets import resolve_targets  # noqa: E402
 
 
 def main() -> None:
+    """Route the CLI into the LLM-first indexing library for the target docs."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--doc-id", action="append", dest="doc_ids", default=[],
                     help="Doc to parse (repeatable)")
