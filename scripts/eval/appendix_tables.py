@@ -181,6 +181,147 @@ def test_table(out) -> None:
     out.append("")
 
 
+VL_TUNE = "stage2_vectorless/tune_vectorless_log.json"
+VEC_TUNE = "stage2_vector/tune_vector_log.json"
+SIG = "stage3_test/significance_test.json"
+INDEXING = REPO_ROOT / "data" / "indexing_cost_summary.json"
+
+
+def load_json(rel: str) -> dict:
+    """Load a JSON log relative to the eval runs directory."""
+    with open(RUNS / rel, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def last_step(log: list, name: str) -> dict:
+    """Return the last decision-log entry for a step.
+
+    The tuning sweeps were re-run, so the final entry holds the clean values the
+    chapter reports, after transient language-model errors were resolved.
+    """
+    return [e for e in log if e.get("step") == name][-1]
+
+
+def _stage2_table(caption: str, label: str, groups, out) -> None:
+    """Append a Stage 2 tuning table. R@2 was not logged during the search."""
+    out.append(r"\begin{table}[H]")
+    out.append(r"  \centering")
+    out.append(r"  \setstretch{1.0}")
+    out.append(r"  \renewcommand{\arraystretch}{1.15}")
+    out.append(r"  \footnotesize")
+    out.append(r"  \caption{%s}" % caption)
+    out.append(r"  \label{%s}" % label)
+    out.append(r"  \begin{tabular}{@{}ll|cccc@{}}")
+    out.append(r"    \toprule")
+    out.append(r"    \textbf{Step} & \textbf{Value} & \textbf{MAP@10} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} \\")
+    out.append(r"    \midrule")
+    for gi, (step, vals) in enumerate(groups):
+        for vi, (vlabel, d) in enumerate(vals):
+            sname = r"\multirow{%d}{*}{%s}" % (len(vals), step) if vi == 0 else ""
+            out.append("    %s & %s & %.4f & %.4f & %.4f & %.4f \\\\" % (
+                sname, vlabel, d["map@10"], d["recall@10"], d["mrr@10"], d["hit@1"]))
+        if gi < len(groups) - 1:
+            out.append(r"    \midrule")
+    out.append(r"    \bottomrule")
+    out.append(r"  \end{tabular}")
+    out.append(r"\end{table}")
+    out.append("")
+
+
+def stage2_vl_table(out) -> None:
+    """Append the vectorless Stage 2 tuning table with full effectiveness metrics."""
+    log = load_json(VL_TUNE)["decision_log"]
+    model = last_step(log, "model_upgrade")
+    qe = last_step(log, "query_expansion")
+    groups = [
+        ("Candidate count", [(str(r["value"]), r) for r in last_step(log, "sweep_bm25_top_k")["results"]]),
+        ("Document-pick count", [(str(r["value"]), r) for r in last_step(log, "sweep_doc_pick_top_k")["results"]]),
+        ("Retrieval model", [("deepseek-v4-flash", model["flash"]), ("deepseek-v4-pro", model["v4_pro"])]),
+        ("Query expansion", [("original query", qe["without_qe"]), ("expanded query", qe["with_qe"])]),
+    ]
+    _stage2_table("Sequential optimization of the best vectorless configuration, full effectiveness metrics.",
+                  "tab:appendix-vl-tuning", groups, out)
+
+
+def stage2_vec_table(out) -> None:
+    """Append the vector Stage 2 tuning table with full effectiveness metrics."""
+    log = load_json(VEC_TUNE)["decision_log"]
+    rer = last_step(log, "reranker_upgrade")
+    qe = last_step(log, "query_expansion")
+    groups = [
+        ("First-stage depth", [(str(r["value"]), r) for r in last_step(log, "sweep_top_n")["results"]]),
+        (r"HNSW \texttt{ef}", [(str(r["value"]), r) for r in last_step(log, "sweep_ef_search")["results"]]),
+        ("Reranker", [("BGE v2 M3", rer["v2_m3_tuned"]), ("BGE v2 Gemma", rer["v2_gemma"])]),
+        ("Query expansion", [("original query", qe["without_qe"]), ("expanded query", qe["with_qe"])]),
+    ]
+    _stage2_table("Sequential optimization of the best vector configuration, full effectiveness metrics.",
+                  "tab:appendix-vec-tuning", groups, out)
+
+
+def effect_size_table(out) -> None:
+    """Append the test-partition effect-size table, vectorless minus vector."""
+    st = load_json(SIG)
+    label_map = {"map@10": "MAP@10", "recall@2": "R@2", "recall@10": "R@10", "mrr@10": "MRR@10", "hit@1": "H@1"}
+    out.append(r"\begin{table}[H]")
+    out.append(r"  \centering")
+    out.append(r"  \setstretch{1.0}")
+    out.append(r"  \renewcommand{\arraystretch}{1.15}")
+    out.append(r"  \footnotesize")
+    out.append(r"  \caption{Effect sizes for the test-partition comparison, vectorless minus vector.}")
+    out.append(r"  \label{tab:appendix-effect-size}")
+    out.append(r"  \begin{tabular}{@{}l|cccc@{}}")
+    out.append(r"    \toprule")
+    out.append(r"    \textbf{Metric} & \textbf{Difference} & \textbf{p-value} & \textbf{Cohen's d} & \textbf{Magnitude} \\")
+    out.append(r"    \midrule")
+    for c in st["comparisons"]:
+        name = label_map.get(c["metric"], c["metric"])
+        if c.get("subset"):
+            name += " (multihop)"
+        out.append("    %s & $+%.4f$ & %.4f & %.2f & %s \\\\" % (
+            name, c["mean_diff"], c["paired_randomization"]["p_value"],
+            c["cohens_d"]["d"], c["cohens_d"]["label"].capitalize()))
+    out.append(r"    \bottomrule")
+    out.append(r"  \end{tabular}")
+    out.append(r"\end{table}")
+    out.append("")
+
+
+def indexing_table(out) -> None:
+    """Append the indexing token-cost table by processing stage and granularity."""
+    with open(INDEXING, encoding="utf-8") as f:
+        ic = json.load(f)
+    parse = ic["pasal"]["per_stage"]["parse"]["tokens"]
+    repair = ic["pasal"]["per_stage"]["ocr_clean"]["tokens"]
+    summ = {g: ic[g]["per_stage"]["summary"]["tokens"] for g in ("pasal", "ayat", "rincian")}
+    total = parse + repair + sum(summ.values())
+    rows = [
+        ("Structural parsing (once)", parse),
+        ("Text repair (once)", repair),
+        (r"Summary annotation, \textit{pasal}", summ["pasal"]),
+        (r"Summary annotation, \textit{ayat}", summ["ayat"]),
+        (r"Summary annotation, \textit{rincian}", summ["rincian"]),
+    ]
+    out.append(r"\begin{table}[H]")
+    out.append(r"  \centering")
+    out.append(r"  \setstretch{1.0}")
+    out.append(r"  \renewcommand{\arraystretch}{1.15}")
+    out.append(r"  \footnotesize")
+    out.append(r"  \caption{Indexing token cost by processing stage and granularity.}")
+    out.append(r"  \label{tab:appendix-indexing}")
+    out.append(r"  \begin{tabular}{@{}l|r@{}}")
+    out.append(r"    \toprule")
+    out.append(r"    \textbf{Processing stage} & \textbf{Tokens} \\")
+    out.append(r"    \midrule")
+    for name, tok in rows:
+        out.append("    %s & %s \\\\" % (name, fmt_int(tok)))
+    out.append(r"    \midrule")
+    out.append("    \\textbf{Total} & \\textbf{%s} \\\\" % fmt_int(total))
+    out.append(r"    \bottomrule")
+    out.append(r"  \end{tabular}")
+    out.append(r"\end{table}")
+    out.append("")
+
+
 HEADER = "% Generated by scripts/eval/appendix_tables.py. Do not edit by hand."
 
 
@@ -202,11 +343,21 @@ def main() -> int:
         vec_table(qt, qt_name, f"tab:appendix-vec-{qt}", stage1)
     (out_dir / "appendix-b-tables.tex").write_text("\n".join(stage1), encoding="utf-8")
 
+    stage2: list[str] = [HEADER]
+    stage2_vl_table(stage2)
+    stage2_vec_table(stage2)
+    (out_dir / "appendix-stage2-tables.tex").write_text("\n".join(stage2), encoding="utf-8")
+
     test: list[str] = [HEADER]
     test_table(test)
+    effect_size_table(test)
     (out_dir / "appendix-test-tables.tex").write_text("\n".join(test), encoding="utf-8")
 
-    print(f"Wrote {len(TYPES) * 2} Stage 1 tables and 1 test table to {out_dir}")
+    indexing: list[str] = [HEADER]
+    indexing_table(indexing)
+    (out_dir / "appendix-indexing-tables.tex").write_text("\n".join(indexing), encoding="utf-8")
+
+    print(f"Wrote Stage 1, Stage 2, test, and indexing appendix tables to {out_dir}")
     return 0
 
 
