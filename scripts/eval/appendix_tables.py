@@ -106,7 +106,7 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
             gname = r"\multirow{6}{*}{%s}" % gran.capitalize() if mi == 0 else ""
             out.append("    %s & %s & %s & %.1f & %s \\\\" % (gname, method, fmt(vals), calls, fmt_int(tokens)))
         if gi < len(GRANS) - 1:
-            out.append(r"    \cmidrule(l){2-9}")
+            out.append(r"    \midrule")
     out.append(r"    \bottomrule")
     out.append(r"  \end{tabular}")
     out.append(r"\end{table}")
@@ -135,7 +135,7 @@ def vec_table(qt: str, qt_name: str, label: str, out) -> None:
                 out.append("    %s & %s & %s & %s \\\\" % (gname, emb_name, rer_name, fmt(vals)))
                 first = False
         if gi < len(GRANS) - 1:
-            out.append(r"    \cmidrule(l){2-8}")
+            out.append(r"    \midrule")
     out.append(r"    \bottomrule")
     out.append(r"  \end{tabular}")
     out.append(r"\end{table}")
@@ -174,7 +174,7 @@ def test_table(out) -> None:
             tname = r"\multirow{2}{*}{%s}" % qt_name if ci == 0 else ""
             out.append("    %s & %s & %s & %.2f \\\\" % (tname, cfg_name, fmt(vals), lat))
         if ti < len(TYPES) - 1:
-            out.append(r"    \cmidrule(l){2-8}")
+            out.append(r"    \midrule")
     out.append(r"    \bottomrule")
     out.append(r"  \end{tabular}")
     out.append(r"\end{table}")
