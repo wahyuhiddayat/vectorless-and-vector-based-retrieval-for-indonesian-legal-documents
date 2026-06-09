@@ -284,6 +284,7 @@ def rank_distribution_stats(records: list[dict]) -> dict:
 def run_self_test() -> None:
     """Run built-in correctness checks for all scoring functions."""
     def assert_close(actual: float, expected: float, tol: float = 1e-6) -> None:
+        """Raise AssertionError unless actual equals expected within tol."""
         if abs(actual - expected) > tol:
             raise AssertionError(f"expected {expected}, got {actual}")
 

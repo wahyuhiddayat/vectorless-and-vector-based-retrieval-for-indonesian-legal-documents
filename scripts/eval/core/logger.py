@@ -13,6 +13,7 @@ from typing import TextIO
 
 
 def _fmt_time(seconds: float) -> str:
+    """Format a duration as a compact string like 1h 02m 03s or 4.5s."""
     seconds = float(seconds)
     if seconds < 60:
         return f"{seconds:.1f}s"
@@ -31,12 +32,17 @@ class ProgressLogger:
     """
 
     def __init__(self, log_path: Path):
+        """Open log_path in append mode, creating parent directories first."""
         self.log_path = log_path
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._fh: TextIO = open(log_path, "a", encoding="utf-8")
 
-    # Core writer
     def _emit(self, text: str, *, to_stdout: bool = True) -> None:
+        """Write one line to the log file, and to stdout unless suppressed.
+
+        Both streams are flushed immediately so partial progress survives a
+        crash or interrupt.
+        """
         if to_stdout:
             print(text)
             sys.stdout.flush()
@@ -44,12 +50,15 @@ class ProgressLogger:
         self._fh.flush()
 
     def info(self, text: str = "") -> None:
+        """Emit a line verbatim, with no prefix."""
         self._emit(text)
 
     def warn(self, text: str) -> None:
+        """Emit a line marked with a warning prefix."""
         self._emit(f"  ! {text}")
 
     def ok(self, text: str) -> None:
+        """Emit a line marked with a success prefix."""
         self._emit(f"  + {text}")
 
     def to_log(self, text: str) -> None:
@@ -62,6 +71,7 @@ class ProgressLogger:
         self._emit(text, to_stdout=False)
 
     def close(self) -> None:
+        """Close the log file handle, ignoring errors during shutdown."""
         try:
             self._fh.close()
         except Exception:
@@ -72,9 +82,16 @@ class ProgressLogger:
     # ------------------------------------------------------------------
 
     def rule(self, char: str = "=", width: int = 64) -> None:
+        """Emit a horizontal rule of repeated char."""
         self._emit(char * width)
 
     def header(self, config: dict, estimated_wall_s: float | None = None) -> None:
+        """Emit the run header block summarizing the eval configuration.
+
+        Reports the run label, systems, granularities, query count, the
+        resulting number of combinations and total calls, and an optional
+        wall-time estimate.
+        """
         self.rule("=")
         self._emit(f"Run: {config['label']}")
         self._emit(f"Started: {config['started_at']}")
@@ -90,6 +107,11 @@ class ProgressLogger:
         self._emit("")
 
     def combo_start(self, combo_idx: int, total_combos: int, system: str, granularity: str) -> None:
+        """Emit the banner opening one system x granularity combination.
+
+        The per-query column header is written to the log file only, since it
+        is only useful alongside the per-query lines that also stay in the log.
+        """
         now = datetime.now().strftime("%H:%M:%S")
         title = f"[{combo_idx}/{total_combos}] {system} x {granularity}"
         dashes = "-" * max(4, 52 - len(title))
@@ -135,6 +157,7 @@ class ProgressLogger:
         )
 
     def combo_summary(self, system: str, granularity: str, records: list[dict], elapsed_s: float) -> None:
+        """Emit mean metrics, error count, and wall time for one finished combination."""
         n = len(records)
         if n == 0:
             self._emit(f"  === {system} x {granularity}: no records")
@@ -151,9 +174,11 @@ class ProgressLogger:
         )
 
     def preflight_header(self) -> None:
+        """Emit the pre-flight section title."""
         self._emit("Pre-flight:")
 
     def preflight_testset(self, distribution: dict) -> None:
+        """Log the loaded testset size with its reference-mode and category breakdown."""
         self.ok(
             f"Testset loaded: {distribution['num_queries']} queries  |  "
             f"{distribution['num_docs']} unique docs  |  "
@@ -167,8 +192,8 @@ class ProgressLogger:
             self._emit("    category:       " + "  ".join(f"{k}={v}" for k, v in sorted(cat.items())))
 
     def preflight_missing_index(self, gran: str, missing: list[str]) -> None:
+        """Warn that docs are absent from the granularity index, previewing the first ten."""
         self.warn(f"{len(missing)} docs missing from data/index_{gran}:")
-        # Show up to 10, summarise the rest
         preview = missing[:10]
         self._emit("      " + ", ".join(preview) + ("  ..." if len(missing) > 10 else ""))
 
@@ -190,6 +215,7 @@ class ProgressLogger:
         run_dir: Path,
         artifact_files: list[str],
     ) -> None:
+        """Emit the closing block with per-combo metrics, error breakdown, and artifact paths."""
         self._emit("")
         self.rule("=")
         self._emit(f"Run completed: {completed_at}  (wall={_fmt_time(wall_s)})")

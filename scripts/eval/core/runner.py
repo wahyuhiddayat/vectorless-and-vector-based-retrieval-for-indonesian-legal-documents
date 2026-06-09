@@ -364,6 +364,12 @@ class EvalRunner:
         query_overrides: dict[str, str] | None = None,
         query_expansion_meta: dict | None = None,
     ):
+        """Store the run configuration, derive defaults, and set up output paths.
+
+        All arguments are keyword-only so the long configuration surface stays
+        readable at the call site. Per-system timeouts default to the shared
+        worker_timeout_s when not given explicitly.
+        """
         self.repo_root = repo_root
         self.worker_script = worker_script
         self.run_dir = run_dir

@@ -216,6 +216,7 @@ def compare_paired(
 def run_self_test() -> None:
     """Sanity tests for each function. Called from the eval CLI on demand."""
     def assert_close(actual: float, expected: float, tol: float = 1e-6) -> None:
+        """Raise AssertionError unless actual equals expected within tol."""
         if abs(actual - expected) > tol:
             raise AssertionError(f"expected {expected}, got {actual}")
 

@@ -21,6 +21,7 @@ TEST_SEAL_ENV = "EVAL_ALLOW_TEST"
 # ----------------------------------------------------------------------
 
 def sanitize_label(label: str | None, fallback: str = "eval") -> str:
+    """Reduce a label to a filesystem-safe slug, returning fallback when empty."""
     if not label:
         return fallback
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", label.strip())
@@ -28,6 +29,7 @@ def sanitize_label(label: str | None, fallback: str = "eval") -> str:
 
 
 def parse_csv_list(raw: str | None, default: list[str]) -> list[str]:
+    """Split a comma-separated CLI string into a list, falling back to default."""
     if not raw:
         return list(default)
     values = [v.strip() for v in raw.split(",") if v.strip()]
@@ -35,6 +37,7 @@ def parse_csv_list(raw: str | None, default: list[str]) -> list[str]:
 
 
 def combo_filename(system: str, granularity: str) -> str:
+    """Build the per-combination JSONL filename for a (system, granularity) pair."""
     return f"{sanitize_label(system, 'system')}__{sanitize_label(granularity, 'gran')}.jsonl"
 
 
@@ -43,6 +46,7 @@ def combo_filename(system: str, granularity: str) -> str:
 # ----------------------------------------------------------------------
 
 def load_testset(path: Path) -> dict[str, dict]:
+    """Load the pickled validated testset keyed by query_id."""
     if not path.exists():
         raise FileNotFoundError(f"validated testset not found: {path}")
     with open(path, "rb") as f:
@@ -166,17 +170,23 @@ def select_queries(
 # ----------------------------------------------------------------------
 
 def write_json(path: Path, payload: dict) -> None:
+    """Write payload as pretty-printed UTF-8 JSON."""
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def write_jsonl(path: Path, records: list[dict]) -> None:
+    """Write one JSON object per line."""
     with open(path, "w", encoding="utf-8") as f:
         for row in records:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def write_csv(path: Path, records: list[dict]) -> None:
+    """Write records to CSV, taking the column order from first appearance of each key.
+
+    An empty record list produces an empty file rather than a header-only one.
+    """
     if not records:
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write("")

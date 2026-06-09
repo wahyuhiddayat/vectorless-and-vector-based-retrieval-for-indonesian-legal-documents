@@ -67,6 +67,27 @@ def build_per_query_record(
     retry_count: int = 0,
     error_category: str = "",
 ) -> dict:
+    """Assemble the full per-query result record written to the records JSONL.
+
+    Combines the testset item, the normalized worker output, scored retrieval
+    metrics, and doc-pick diagnostics into one flat dict. Also resolves the
+    error fields, falling back to worker stdout when stderr is empty.
+
+    Args:
+        qid: Query id.
+        item: Testset entry for this query, including gold labels.
+        system: Retrieval system label.
+        granularity: Evaluation granularity, selects which gold key to score.
+        cutoffs: Rank cutoffs to score, for example [1, 3, 5, 10].
+        normalized: Worker output normalized to retrieved ids, sources, metrics.
+        worker_stdout: Captured worker stdout, used as an error fallback.
+        worker_stderr: Captured worker stderr.
+        retry_count: Number of retries spent on this query.
+        error_category: Coarse error label assigned by the runner.
+
+    Returns:
+        Flat record dict with metadata, retrieved ids, metrics, and cost fields.
+    """
     gold_key = GOLD_KEY_BY_GRANULARITY[granularity]
     relevant_ids = set(item.get(gold_key, set()))
     retrieval_metrics = score_ranked_retrieval(
