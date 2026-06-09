@@ -20,6 +20,8 @@ scraper/ -> data/raw/  ->  vectorless/indexing/ -> data/index_{pasal,ayat,rincia
                                             scripts/ (ground truth generation and evaluation)
 ```
 
+The diagram source is in `assets/architecture.d2`, rendered at https://play.d2lang.com.
+
 The corpus is parsed once into three granularities. The `pasal` index is produced by the LLM parser followed by OCR cleanup and per-node summaries. The `ayat` and `rincian` indexes are derived deterministically from `pasal`. Both retrieval paradigms consume these shared index files.
 
 ## Repository structure
@@ -42,6 +44,12 @@ pip install -r requirements.txt
 gcloud auth application-default login    # Vertex AI application default credentials
 cp .env.example .env                     # then fill in the API keys
 ```
+
+## Data
+
+The corpus, indexes, ground truth, and evaluation runs are not tracked in git. The full dataset is published on Hugging Face.
+
+https://huggingface.co/datasets/wahyyuht/skripsi-data
 
 ## Pipeline
 
@@ -135,4 +143,4 @@ Roles are distributed across three vendors so that no comparison boundary shares
 
 ## Notes
 
-The `data/` directory is not tracked in git. It holds the scraped corpus, the indexes, the ground truth, and the evaluation runs, and is backed up separately. The pipeline is retrieval-only, so no answer-generation component is included.
+The full dataset behind every stage is on Hugging Face, see the Data section above. The pipeline is retrieval-only, so no answer-generation component is included.
