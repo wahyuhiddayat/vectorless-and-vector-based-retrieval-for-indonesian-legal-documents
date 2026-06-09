@@ -41,11 +41,17 @@ TYPES = [("factual", "Factual"), ("paraphrased", "Paraphrased"), ("multihop", "M
 
 
 def load(rel: str) -> list[dict]:
+    """Load a records JSONL file relative to the eval runs directory."""
     with open(RUNS / rel, encoding="utf-8") as f:
         return [json.loads(line) for line in f]
 
 
 def vl_rows(method: str, gran: str) -> list[dict]:
+    """Load vectorless records for one method and granularity.
+
+    llm-flat runs are stored per granularity, so they resolve to a separate
+    run path from the other methods.
+    """
     if method == "llm-flat":
         rel = f"{LLM_FLAT_RUNS[gran]}/records/llm-flat__{gran}.jsonl"
     else:
@@ -54,37 +60,53 @@ def vl_rows(method: str, gran: str) -> list[dict]:
 
 
 def vec_rows(gran: str, emb: str, rer: str) -> list[dict]:
+    """Load vector records for one granularity, embedding, and reranker combination."""
     return load(f"{VECTOR_RUN}/records/vector-dense__{gran}__{emb}__{rer}.jsonl")
 
 
 def cell(rows: list[dict], qt: str, metric: str) -> float:
+    """Mean of one metric over the records matching the given query type."""
     sub = [r for r in rows if r.get("query_type") == qt]
     return sum((r.get(metric) or 0) for r in sub) / len(sub)
 
 
 def fmt(vals: list[float]) -> str:
+    """Format a metric row as ampersand-separated four-decimal LaTeX cells."""
     return " & ".join(f"{v:.4f}" for v in vals)
 
 
+def fmt_int(n: float) -> str:
+    """Format a token count with LaTeX thousands separators, e.g. 138{,}055."""
+    return f"{int(round(n)):,}".replace(",", "{,}")
+
+
 def vl_table(qt: str, qt_name: str, label: str, out) -> None:
+    """Append a vectorless results table for one query type to out.
+
+    Reports the five effectiveness metrics plus per-query LLM calls and tokens.
+    The cost columns are configuration-level and vary little across query types.
+    """
     out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
-    out.append(r"  \footnotesize")
+    out.append(r"  \scriptsize")
     out.append(r"  \caption{Vectorless results on %s queries across all granularities.}" % qt_name.lower())
     out.append(r"  \label{%s}" % label)
-    out.append(r"  \begin{tabular}{@{}ll|ccccc@{}}")
+    out.append(r"  \begin{tabular}{@{}ll|ccccc|rr@{}}")
     out.append(r"    \toprule")
-    out.append(r"    \textbf{Granularity} & \textbf{Method} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} \\")
+    out.append(r"    \textbf{Granularity} & \textbf{Method} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{LLM calls} & \textbf{LLM tokens} \\")
     out.append(r"    \midrule")
     for gi, gran in enumerate(GRANS):
         for mi, method in enumerate(VL_METHODS):
-            vals = [cell(vl_rows(method, gran), qt, m) for m in METRICS]
+            rows = vl_rows(method, gran)
+            vals = [cell(rows, qt, m) for m in METRICS]
+            calls = cell(rows, qt, "llm_calls")
+            tokens = cell(rows, qt, "total_tokens")
             gname = r"\multirow{6}{*}{%s}" % gran.capitalize() if mi == 0 else ""
-            out.append("    %s & %s & %s \\\\" % (gname, method, fmt(vals)))
+            out.append("    %s & %s & %s & %.1f & %s \\\\" % (gname, method, fmt(vals), calls, fmt_int(tokens)))
         if gi < len(GRANS) - 1:
-            out.append(r"    \cmidrule(l){2-7}")
+            out.append(r"    \cmidrule(l){2-9}")
     out.append(r"    \bottomrule")
     out.append(r"  \end{tabular}")
     out.append(r"\end{table}")
@@ -92,6 +114,7 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
 
 
 def vec_table(qt: str, qt_name: str, label: str, out) -> None:
+    """Append a vector results table for one query type to out."""
     out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
@@ -119,17 +142,71 @@ def vec_table(qt: str, qt_name: str, label: str, out) -> None:
     out.append("")
 
 
+TEST_RUNS = [
+    ("Vectorless", "stage3_test/rq4_test_hybrid_tree/records/hybrid-tree__pasal.jsonl"),
+    ("Vector", "stage3_test/rq4_test_v2m3_qe/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl"),
+]
+
+
+def test_table(out) -> None:
+    """Append the Stage 3 test-partition results broken down by query type.
+
+    Both tuned configurations are reported per query type with the five
+    effectiveness metrics and mean latency. The language-model token cost is
+    configuration-level and reported in the cost tables of Chapter 4.
+    """
+    out.append(r"\begin{table}[H]")
+    out.append(r"  \centering")
+    out.append(r"  \setstretch{1.0}")
+    out.append(r"  \renewcommand{\arraystretch}{1.15}")
+    out.append(r"  \footnotesize")
+    out.append(r"  \caption{Test-partition results by query type for the tuned hybrid-tree (vectorless) and tuned BGE-M3 with reranker and query expansion (vector) configurations.}")
+    out.append(r"  \label{tab:appendix-test-bytype}")
+    out.append(r"  \begin{tabular}{@{}ll|ccccc|r@{}}")
+    out.append(r"    \toprule")
+    out.append(r"    \textbf{Query type} & \textbf{Configuration} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{Latency (s)} \\")
+    out.append(r"    \midrule")
+    for ti, (qt, qt_name) in enumerate(TYPES):
+        for ci, (cfg_name, path) in enumerate(TEST_RUNS):
+            rows = load(path)
+            vals = [cell(rows, qt, m) for m in METRICS]
+            lat = cell(rows, qt, "elapsed_s")
+            tname = r"\multirow{2}{*}{%s}" % qt_name if ci == 0 else ""
+            out.append("    %s & %s & %s & %.2f \\\\" % (tname, cfg_name, fmt(vals), lat))
+        if ti < len(TYPES) - 1:
+            out.append(r"    \cmidrule(l){2-8}")
+    out.append(r"    \bottomrule")
+    out.append(r"  \end{tabular}")
+    out.append(r"\end{table}")
+    out.append("")
+
+
+HEADER = "% Generated by scripts/eval/appendix_tables.py. Do not edit by hand."
+
+
 def main() -> int:
+    """Render the appendix tables and write them to the --out directory.
+
+    Stage 1 per-type tables go to appendix-b-tables.tex (included by Appendix 2)
+    and the Stage 3 test table goes to appendix-test-tables.tex (Appendix 3).
+    """
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", required=True, help="thesis src/99-backMatter directory")
     args = ap.parse_args()
-    out: list[str] = ["% Generated by scripts/eval/appendix_tables.py. Do not edit by hand."]
+    out_dir = Path(args.out)
+
+    stage1: list[str] = [HEADER]
     for qt, qt_name in TYPES:
-        vl_table(qt, qt_name, f"tab:appendix-vl-{qt}", out)
+        vl_table(qt, qt_name, f"tab:appendix-vl-{qt}", stage1)
     for qt, qt_name in TYPES:
-        vec_table(qt, qt_name, f"tab:appendix-vec-{qt}", out)
-    Path(args.out).write_text("\n".join(out), encoding="utf-8")
-    print(f"Wrote {len([t for t in TYPES]) * 2} appendix tables to {args.out}")
+        vec_table(qt, qt_name, f"tab:appendix-vec-{qt}", stage1)
+    (out_dir / "appendix-b-tables.tex").write_text("\n".join(stage1), encoding="utf-8")
+
+    test: list[str] = [HEADER]
+    test_table(test)
+    (out_dir / "appendix-test-tables.tex").write_text("\n".join(test), encoding="utf-8")
+
+    print(f"Wrote {len(TYPES) * 2} Stage 1 tables and 1 test table to {out_dir}")
     return 0
 
 
