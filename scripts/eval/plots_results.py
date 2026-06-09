@@ -1,6 +1,6 @@
 """Generate the thesis result plots from the per-query eval records.
 
-Produces three PDF figures for the thesis, recomputed from the records so
+Produces four PDF figures for the thesis, recomputed from the records so
 they stay consistent with the reported tables. Errored queries count as
 zero, matching the table convention.
 
@@ -111,23 +111,17 @@ def plot_granularity(out: Path) -> None:
 
 
 def plot_bytype(out: Path) -> None:
-    """Grouped bars, MAP@10 by query type for the leading pasal configurations."""
+    """Grouped bars, MAP@10 by query type for the leading config of each paradigm."""
     configs = [
-        ("bm25-flat", lambda: vl_records("bm25-flat", "pasal")),
-        ("hybrid-flat", lambda: vl_records("hybrid-flat", "pasal")),
-        ("hybrid-tree", lambda: vl_records("hybrid-tree", "pasal")),
-        ("llm-flat", lambda: vl_records("llm-flat", "pasal")),
-        ("llm-tree", lambda: vl_records("llm-tree", "pasal")),
-        ("vector", lambda: vec_records("pasal", "bge-m3", "bge-reranker-v2-m3")),
+        ("Vectorless\n(hybrid-tree)", lambda: vl_records("hybrid-tree", "pasal")),
+        ("Vector\n(BGE-M3 + BGE v2 M3)", lambda: vec_records("pasal", "bge-m3", "bge-reranker-v2-m3")),
     ]
     types = ["factual", "paraphrased", "multihop"]
     colors = {"factual": UIBLUE, "paraphrased": GRAY, "multihop": UIRED}
-    # Family gaps within the vectorless side and a wider gap before the
-    # vector configuration to separate the two paradigms.
-    config_x = [0.0, 1.45, 2.45, 3.9, 4.9, 6.55]
+    config_x = [0.0, 1.25]
 
     fig, ax = plt.subplots(figsize=(6.3, 3.1))
-    width = 0.26
+    width = 0.32
     for ti, qt in enumerate(types):
         vals = []
         for _, loader in configs:
@@ -139,6 +133,7 @@ def plot_bytype(out: Path) -> None:
         ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
     ax.set_xticks(config_x)
     ax.set_xticklabels([c for c, _ in configs])
+    ax.set_xlim(-0.7, 1.95)
     ax.set_ylabel("MAP@10")
     ax.set_ylim(0, 1.12)
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
@@ -200,6 +195,54 @@ def plot_cost(out: Path) -> None:
     plt.close(fig)
 
 
+def plot_tuning(out: Path) -> None:
+    """Line plot, best-so-far MAP@10 across the four aligned Stage 2 tuning stages.
+
+    Each paradigm follows the same four-stage shape, baseline, hyperparameter
+    tuning, main-model swap, and query expansion. A rejected step reuses the
+    previous run, so the line tracks the value actually carried forward.
+    """
+    stages = ["Baseline", "Hyperparameters", "Model swap", "Query expansion"]
+    vl_runs = [
+        "stage2_vectorless/run50_bm25topk10",
+        "stage2_vectorless/run51_docpick5",
+        "stage2_vectorless/run52_v4pro_topk20_docpick5",
+        "stage2_vectorless/run52_v4pro_topk20_docpick5",
+    ]
+    vec_runs = [
+        "stage2_vector/run38_topn50",
+        "stage2_vector/run39_ef64_topn100",
+        "stage2_vector/run39_ef64_topn100",
+        "stage2_vector/run42_qe_v2m3_topn100_ef64",
+    ]
+    vl_rec = "records/hybrid-tree__pasal.jsonl"
+    vec_rec = "records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl"
+    vl_vals = [mean(load_records(f"{r}/{vl_rec}"), "map@10") for r in vl_runs]
+    vec_vals = [mean(load_records(f"{r}/{vec_rec}"), "map@10") for r in vec_runs]
+
+    x = list(range(len(stages)))
+    fig, ax = plt.subplots(figsize=(6.3, 3.3))
+    ax.plot(x, vl_vals, marker="o", color=UIRED, linewidth=2,
+            label="Vectorless (hybrid-tree)")
+    ax.plot(x, vec_vals, marker="s", color=UIBLUE, linewidth=2,
+            label="Vector (BGE-M3 + BGE v2 M3)")
+    for xi, v in zip(x, vl_vals):
+        ax.annotate(f"{v:.4f}", (xi, v), textcoords="offset points",
+                    xytext=(0, 9), ha="center", fontsize=8, color=UIRED)
+    for xi, v in zip(x, vec_vals):
+        ax.annotate(f"{v:.4f}", (xi, v), textcoords="offset points",
+                    xytext=(0, -15), ha="center", fontsize=8, color=UIBLUE)
+    ax.set_xticks(x)
+    ax.set_xticklabels(stages)
+    ax.set_ylabel("MAP@10")
+    ax.set_ylim(0.84, 0.98)
+    ax.set_xlim(-0.35, len(stages) - 0.65)
+    ax.legend(frameon=False, loc="upper left", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / "tuning-trajectory.pdf")
+    plt.close(fig)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(REPO_ROOT.parents[1] / "laporan-skripsi" / "assets" / "figures" / "bab4"))
@@ -210,7 +253,8 @@ def main() -> int:
     plot_granularity(out)
     plot_bytype(out)
     plot_cost(out)
-    print(f"Wrote 3 figures to {out}")
+    plot_tuning(out)
+    print(f"Wrote 4 figures to {out}")
     return 0
 
 
