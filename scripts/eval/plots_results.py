@@ -276,7 +276,7 @@ def plot_tuning(out: Path) -> None:
     plt.close(fig)
 
 
-def plot_emb_reranker_heatmap(out: Path) -> None:
+def plot_emb_reranker_heatmap(out: Path, fmt: str = "pdf") -> None:
     """Heatmap, pasal MAP@10 by embedding model and reranker for the vector paradigm.
 
     Rows are embedding models and columns are rerankers, recomputed from the
@@ -319,14 +319,57 @@ def plot_emb_reranker_heatmap(out: Path) -> None:
     ax.set_xlabel("Reranker", fontweight="bold", labelpad=8)
     ax.set_ylabel("Embedding", fontweight="bold", labelpad=8)
     fig.tight_layout()
-    fig.savefig(out / "emb-reranker-heatmap.pdf")
+    fig.savefig(out / f"emb-reranker-heatmap.{fmt}")
+    plt.close(fig)
+
+
+def plot_vec_granularity(out: Path, fmt: str = "pdf") -> None:
+    """Grouped bars, MAP@10 by embedding and granularity at the BGE reranker.
+
+    The reranker is fixed to BGE-Reranker-v2-M3, the strongest of the three, so
+    the figure isolates the granularity effect for each embedding. Pasal leads at
+    every embedding, which mirrors the vectorless side and is why the comparison
+    centers on the pasal level.
+    """
+    embeds = [
+        ("bge-m3", "BGE-M3"),
+        ("multilingual-e5-large-instruct", "Multilingual E5"),
+        ("all-nusabert-large-v4", "NusaBERT"),
+    ]
+    reranker = "bge-reranker-v2-m3"
+    grans = ["pasal", "ayat", "rincian"]
+    colors = {"pasal": UIBLUE, "ayat": "#6E87B7", "rincian": "#C9D3E6"}
+
+    emb_x = [0.0, 1.0, 2.0]
+    fig, ax = plt.subplots(figsize=(6.3, 3.1))
+    width = 0.26
+    for gi, gran in enumerate(grans):
+        vals = [mean(vec_records(gran, emb, reranker), "map@10") for emb, _ in embeds]
+        xs = [x + (gi - 1) * width for x in emb_x]
+        bars = ax.bar(xs, vals, width=width, color=colors[gran], label=gran.capitalize(),
+                      edgecolor="white", linewidth=0.4)
+        ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
+    ax.set_xticks(emb_x)
+    ax.set_xticklabels([lab for _, lab in embeds])
+    ax.set_ylabel("MAP@10")
+    ax.set_ylim(0, 1.08)
+    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
+    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
+    fig.tight_layout()
+    fig.savefig(out / f"vec-granularity.{fmt}")
     plt.close(fig)
 
 
 def main() -> int:
-    """Render every thesis figure into the --out directory."""
+    """Render every thesis figure into the --out directory.
+
+    When --svg-dir is given, the two RQ2 slide figures are also written there as
+    SVG for the defense deck, which uses SVG assets rather than PDF.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(REPO_ROOT.parents[1] / "laporan-skripsi" / "assets" / "figures" / "bab4"))
+    ap.add_argument("--svg-dir", default=None,
+                    help="If set, also write the RQ2 slide figures as SVG into this directory.")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -336,7 +379,14 @@ def main() -> int:
     plot_cost(out)
     plot_tuning(out)
     plot_emb_reranker_heatmap(out)
-    print(f"Wrote 5 figures to {out}")
+    plot_vec_granularity(out)
+    print(f"Wrote 6 figures to {out}")
+    if args.svg_dir:
+        svg_dir = Path(args.svg_dir)
+        svg_dir.mkdir(parents=True, exist_ok=True)
+        plot_emb_reranker_heatmap(svg_dir, fmt="svg")
+        plot_vec_granularity(svg_dir, fmt="svg")
+        print(f"Wrote 2 SVG slide figures to {svg_dir}")
     return 0
 
 
