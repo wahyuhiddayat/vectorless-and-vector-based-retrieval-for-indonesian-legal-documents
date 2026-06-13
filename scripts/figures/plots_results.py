@@ -1,11 +1,11 @@
 """Generate the thesis result plots from the per-query eval records.
 
-Produces four PDF figures for the thesis, recomputed from the records so
+Produces six PDF figures for the thesis, recomputed from the records so
 they stay consistent with the reported tables. Errored queries count as
 zero, matching the table convention.
 
 Usage:
-    python scripts/eval/plots_results.py --out "../laporan-skripsi/assets/figures/bab4"
+    python scripts/figures/plots_results.py --out "../laporan-skripsi/assets/figures/bab4"
 """
 
 from __future__ import annotations
