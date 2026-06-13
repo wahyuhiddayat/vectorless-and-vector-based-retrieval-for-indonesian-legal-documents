@@ -26,3 +26,7 @@ transformers>=4.44,<5.0
 
 # GT typed-query validation
 Sastrawi>=1.0.1
+
+# Thesis result figures
+matplotlib>=3.7
+seaborn>=0.13

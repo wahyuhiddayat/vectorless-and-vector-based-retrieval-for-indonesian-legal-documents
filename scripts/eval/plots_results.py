@@ -18,6 +18,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib.colors import LinearSegmentedColormap
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNS = REPO_ROOT / "data" / "eval_runs"
@@ -274,6 +276,53 @@ def plot_tuning(out: Path) -> None:
     plt.close(fig)
 
 
+def plot_emb_reranker_heatmap(out: Path) -> None:
+    """Heatmap, pasal MAP@10 by embedding model and reranker for the vector paradigm.
+
+    Rows are embedding models and columns are rerankers, recomputed from the
+    Stage 1 vector records so the cells match the reported table. The fill uses
+    the same blue family as the granularity bars, so the darkest cell is the
+    leading configuration.
+    """
+    embeds = [
+        ("bge-m3", "BGE-M3"),
+        ("multilingual-e5-large-instruct", "Multilingual E5"),
+        ("all-nusabert-large-v4", "NusaBERT"),
+    ]
+    rerankers = [
+        ("none", "No reranker"),
+        ("qwen3-reranker-0.6b", "Qwen3-Reranker\n0.6B"),
+        ("bge-reranker-v2-m3", "BGE-Reranker\nv2-M3"),
+    ]
+    grid = [[mean(vec_records("pasal", emb, rer), "map@10") for rer, _ in rerankers]
+            for emb, _ in embeds]
+    flat = [v for row in grid for v in row]
+
+    # Light to UIBLUE ramp, the same blue family the granularity bars use.
+    cmap = LinearSegmentedColormap.from_list("uiblue", ["#EEF3FA", "#7E97C4", UIBLUE])
+
+    fig, ax = plt.subplots(figsize=(5.8, 3.4))
+    ax.grid(False)
+    sns.heatmap(
+        grid, ax=ax, cmap=cmap, vmin=min(flat), vmax=max(flat),
+        annot=True, fmt=".4f", annot_kws={"fontsize": 10}, square=True,
+        linewidths=0, cbar_kws={"label": "MAP@10", "shrink": 0.85},
+        xticklabels=[lab for _, lab in rerankers],
+        yticklabels=[lab for _, lab in embeds],
+    )
+
+    ax.xaxis.set_ticks_position("top")
+    ax.xaxis.set_label_position("top")
+    ax.tick_params(length=0)
+    plt.setp(ax.get_yticklabels(), rotation=0)
+    plt.setp(ax.get_xticklabels(), fontsize=8.5)
+    ax.set_xlabel("Reranker", fontweight="bold", labelpad=8)
+    ax.set_ylabel("Embedding", fontweight="bold", labelpad=8)
+    fig.tight_layout()
+    fig.savefig(out / "emb-reranker-heatmap.pdf")
+    plt.close(fig)
+
+
 def main() -> int:
     """Render every thesis figure into the --out directory."""
     ap = argparse.ArgumentParser()
@@ -286,7 +335,8 @@ def main() -> int:
     plot_bytype(out)
     plot_cost(out)
     plot_tuning(out)
-    print(f"Wrote 4 figures to {out}")
+    plot_emb_reranker_heatmap(out)
+    print(f"Wrote 5 figures to {out}")
     return 0
 
 
