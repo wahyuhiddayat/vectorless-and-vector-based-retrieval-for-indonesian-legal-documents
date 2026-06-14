@@ -211,10 +211,9 @@ TABLES = [
             ["llm-tree", "0.9496", "0.9469", "0.8880"],
         ],
     },
-    # Source: tab:vec-stage1 (bab4.tex). Claim-driven condensation, the tied top
-    # pair, the third-place row that defines the 0.0590 gap, and two NusaBERT
-    # rows showing the specialized model trails under the same reranker and at
-    # the floor. All pasal, full matrix left to the appendix table.
+    # Source: tab:vec-stage1 (bab4.tex). Claim-driven condensation matching the
+    # Slide 19 bullets, the tied top pair and the third-place row that defines the
+    # 0.0590 gap. All pasal, full matrix left to the appendix table.
     {
         "stem": "tab-vec-stage1",
         "bold_rows": [0],
@@ -223,8 +222,6 @@ TABLES = [
             ["BGE-M3", "BGE v2 M3", "0.8898", "0.8768", "0.9776", "0.9153", "0.8711", "1.70"],
             ["E5", "BGE v2 M3", "0.8870", "0.8711", "0.9678", "0.9142", "0.8739", "1.35"],
             ["E5", "Qwen3 0.6B", "0.8280", "0.8375", "0.9608", "0.8604", "0.7787", "3.08"],
-            ["NusaBERT", "BGE v2 M3", "0.8057", "0.8137", "0.8880", "0.8533", "0.8011", "1.02"],
-            ["NusaBERT", "none", "0.6017", "0.5896", "0.8221", "0.6550", "0.5462", "0.11"],
         ],
     },
     # Source: tab:winners (bab4.tex), the two best Stage 1 configurations side by side.
