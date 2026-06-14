@@ -151,7 +151,7 @@ TEST_RUNS = [
 def test_table(out) -> None:
     """Append the Stage 3 test-partition results broken down by query type.
 
-    Both tuned configurations are reported per query type with the five
+    Both optimized configurations are reported per query type with the five
     effectiveness metrics and mean latency. The language-model token cost is
     configuration-level and reported in the cost tables of Chapter 4.
     """
@@ -160,7 +160,7 @@ def test_table(out) -> None:
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \footnotesize")
-    out.append(r"  \caption{Test-partition results by query type for the tuned vectorless and vector configurations.}")
+    out.append(r"  \caption{Test-partition results by query type for the optimized vectorless and vector configurations.}")
     out.append(r"  \label{tab:appendix-test-bytype}")
     out.append(r"  \begin{tabular}{@{}ll|ccccc|r@{}}")
     out.append(r"    \toprule")
