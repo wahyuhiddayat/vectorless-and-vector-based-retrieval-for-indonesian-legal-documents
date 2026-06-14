@@ -184,7 +184,10 @@ TABLES = [
              "Compare the paradigms on unseen\nqueries and measure cost"],
         ],
     },
-    # Source: tab:vl-stage1 (bab4.tex), condensed to the top six rows plus the two BM25 pasal rows.
+    # Source: tab:vl-stage1 (bab4.tex). Claim-driven condensation, the four
+    # statistically tied LLM-ranked pasal configurations plus the two BM25 pasal
+    # floor rows the overall-slide bullets reference. The granularity tail is
+    # left to the granularity figure and the full appendix table.
     {
         "stem": "tab-vl-stage1",
         "bold_rows": [0],
@@ -194,8 +197,6 @@ TABLES = [
             ["hybrid-flat", "Pasal", "0.8954", "0.8908", "0.9230", "0.9060", "0.8908", "6.71"],
             ["llm-tree", "Pasal", "0.8868", "0.8922", "0.9090", "0.9085", "0.8880", "11.09"],
             ["llm-flat", "Pasal", "0.8840", "0.8768", "0.9216", "0.8994", "0.8824", "13.13"],
-            ["llm-flat", "Rincian", "0.8609", "0.8515", "0.9328", "0.8955", "0.8571", "62.52"],
-            ["hybrid-tree", "Ayat", "0.8327", "0.8445", "0.8782", "0.8610", "0.8235", "15.83"],
             ["bm25-flat", "Pasal", "0.6948", "0.6933", "0.8613", "0.7427", "0.6667", "0.49"],
             ["bm25-tree", "Pasal", "0.5582", "0.5392", "0.7129", "0.5989", "0.5266", "0.09"],
         ],
@@ -210,7 +211,10 @@ TABLES = [
             ["llm-tree", "0.9496", "0.9469", "0.8880"],
         ],
     },
-    # Source: tab:vec-stage1 (bab4.tex), condensed to the top six pasal rows plus one NusaBERT row.
+    # Source: tab:vec-stage1 (bab4.tex). Claim-driven condensation, the tied top
+    # pair, the third-place row that defines the 0.0590 gap, and two NusaBERT
+    # rows showing the specialized model trails under the same reranker and at
+    # the floor. All pasal, full matrix left to the appendix table.
     {
         "stem": "tab-vec-stage1",
         "bold_rows": [0],
@@ -219,9 +223,7 @@ TABLES = [
             ["BGE-M3", "BGE v2 M3", "0.8898", "0.8768", "0.9776", "0.9153", "0.8711", "1.70"],
             ["E5", "BGE v2 M3", "0.8870", "0.8711", "0.9678", "0.9142", "0.8739", "1.35"],
             ["E5", "Qwen3 0.6B", "0.8280", "0.8375", "0.9608", "0.8604", "0.7787", "3.08"],
-            ["BGE-M3", "Qwen3 0.6B", "0.8257", "0.8347", "0.9650", "0.8552", "0.7675", "3.69"],
             ["NusaBERT", "BGE v2 M3", "0.8057", "0.8137", "0.8880", "0.8533", "0.8011", "1.02"],
-            ["BGE-M3", "none", "0.7948", "0.7927", "0.9342", "0.8368", "0.7591", "0.12"],
             ["NusaBERT", "none", "0.6017", "0.5896", "0.8221", "0.6550", "0.5462", "0.11"],
         ],
     },
