@@ -184,21 +184,22 @@ TABLES = [
              "Compare the paradigms on unseen\nqueries and measure cost"],
         ],
     },
-    # Source: tab:vl-stage1 (bab4.tex). Claim-driven condensation, the four
-    # statistically tied LLM-ranked pasal configurations plus the two BM25 pasal
-    # floor rows the overall-slide bullets reference. The granularity tail is
-    # left to the granularity figure and the full appendix table.
+    # Source: tab:vl-stage1 (bab4.tex). All six vectorless methods at the pasal
+    # granularity, the four statistically tied LLM-ranked methods and the two BM25
+    # floor rows. Granularity is uniform here so the column is dropped to match the
+    # vector overall table, which keeps this a clean per-method comparison. The
+    # granularity sweep is the next slide and the full appendix table.
     {
         "stem": "tab-vl-stage1",
         "bold_rows": [0],
-        "headers": ["Method", "Granularity", "MAP@10", "R@2", "R@10", "MRR@10", "H@1", "Avg s"],
+        "headers": ["Method", "MAP@10", "R@2", "R@10", "MRR@10", "H@1", "Avg s"],
         "rows": [
-            ["hybrid-tree", "Pasal", "0.8974", "0.9034", "0.9244", "0.9074", "0.8880", "13.84"],
-            ["hybrid-flat", "Pasal", "0.8954", "0.8908", "0.9230", "0.9060", "0.8908", "6.71"],
-            ["llm-tree", "Pasal", "0.8868", "0.8922", "0.9090", "0.9085", "0.8880", "11.09"],
-            ["llm-flat", "Pasal", "0.8840", "0.8768", "0.9216", "0.8994", "0.8824", "13.13"],
-            ["bm25-flat", "Pasal", "0.6948", "0.6933", "0.8613", "0.7427", "0.6667", "0.49"],
-            ["bm25-tree", "Pasal", "0.5582", "0.5392", "0.7129", "0.5989", "0.5266", "0.09"],
+            ["hybrid-tree", "0.8974", "0.9034", "0.9244", "0.9074", "0.8880", "13.84"],
+            ["hybrid-flat", "0.8954", "0.8908", "0.9230", "0.9060", "0.8908", "6.71"],
+            ["llm-tree", "0.8868", "0.8922", "0.9090", "0.9085", "0.8880", "11.09"],
+            ["llm-flat", "0.8840", "0.8768", "0.9216", "0.8994", "0.8824", "13.13"],
+            ["bm25-flat", "0.6948", "0.6933", "0.8613", "0.7427", "0.6667", "0.49"],
+            ["bm25-tree", "0.5582", "0.5392", "0.7129", "0.5989", "0.5266", "0.09"],
         ],
     },
     # Source: tab:tree-decomp (bab4.tex), two-stage breakdown of the hierarchical methods.
