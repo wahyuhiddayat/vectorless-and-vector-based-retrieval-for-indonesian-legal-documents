@@ -11,11 +11,13 @@ spec notes its source table.
 Usage:
     python scripts/figures/slide_tables.py
     python scripts/figures/slide_tables.py --out "../../05 Thesis Defense/Assets/svg"
+    python scripts/figures/slide_tables.py --verify
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
 import matplotlib
@@ -26,6 +28,27 @@ from matplotlib.font_manager import FontProperties
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DECK_SVG = REPO_ROOT.parents[1] / "05 Thesis Defense" / "Assets" / "svg"
+THESIS_BODY = REPO_ROOT.parents[1] / "laporan-skripsi" / "src" / "01-body"
+
+# Maps each table stem to the source thesis table it was transcribed from, used
+# by --verify to confirm every number in a spec appears in that table.
+SOURCE_TABLE = {
+    "tab-vectorless-methods": ("bab3.tex", "tab:vectorless-methods"),
+    "tab-vector-config": ("bab3.tex", "tab:vector-config"),
+    "tab-stages": ("bab3.tex", "tab:stages"),
+    "tab-vl-stage1": ("bab4.tex", "tab:vl-stage1"),
+    "tab-vl-stage1-full": ("bab4.tex", "tab:vl-stage1"),
+    "tab-tree-decomp": ("bab4.tex", "tab:tree-decomp"),
+    "tab-vec-stage1": ("bab4.tex", "tab:vec-stage1"),
+    "tab-vec-stage1-full": ("bab4.tex", "tab:vec-stage1"),
+    "tab-winners": ("bab4.tex", "tab:winners"),
+    "tab-vl-tuning": ("bab4.tex", "tab:vl-tuning"),
+    "tab-vec-tuning": ("bab4.tex", "tab:vec-tuning"),
+    "tab-test-winners": ("bab4.tex", "tab:test-winners"),
+    "tab-test-sig": ("bab4.tex", "tab:test-sig"),
+    "tab-sibling": ("bab4.tex", "tab:sibling"),
+    "tab-cost-test": ("bab4.tex", "tab:cost-test"),
+}
 
 HEADER_COLOR = "#0D2D44"
 BORDER_COLOR = "#D9D9D9"
@@ -362,11 +385,58 @@ TABLES = [
 ]
 
 
+def _numbers(text: str) -> set[str]:
+    """Numeric tokens in text, with thousands separators removed for comparison."""
+    text = text.replace("{,}", "").replace(",", "")
+    return set(re.findall(r"\d+\.\d+|\d+", text))
+
+
+def _source_block(tex: str, label: str) -> str:
+    """The table environment in tex that carries the given label."""
+    for match in re.finditer(r"\\begin\{table\}.*?\\end\{table\}", tex, re.S):
+        if "\\label{" + label + "}" in match.group(0):
+            return match.group(0)
+    return ""
+
+
+def verify_numbers() -> int:
+    """Check every number in each spec appears in its source thesis table.
+
+    This guards the hand-transcribed values against typos. It confirms presence
+    in the right table, not cell position, so it does not catch a correct value
+    placed in the wrong cell. Returns the count of values not found in source.
+    """
+    files: dict[str, str] = {}
+    missing_total = 0
+    for spec in TABLES:
+        fname, label = SOURCE_TABLE[spec["stem"]]
+        if fname not in files:
+            files[fname] = (THESIS_BODY / fname).read_text(encoding="utf-8")
+        source = _numbers(_source_block(files[fname], label))
+        spec_nums: set[str] = set()
+        for row in spec["rows"]:
+            for cell in row:
+                spec_nums |= _numbers(cell)
+        missing = sorted(spec_nums - source, key=float)
+        if missing:
+            missing_total += len(missing)
+            print("[MISMATCH] " + spec["stem"] + ": not in source -> " + ", ".join(missing))
+        else:
+            print("[ok] " + spec["stem"])
+    print("All numbers verified against the thesis." if missing_total == 0
+          else str(missing_total) + " value(s) need review.")
+    return missing_total
+
+
 def main() -> int:
     """Render every deck table spec into the --out directory as SVG."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(DECK_SVG))
+    ap.add_argument("--verify", action="store_true",
+                    help="Check spec numbers against the thesis tables instead of rendering.")
     args = ap.parse_args()
+    if args.verify:
+        return 1 if verify_numbers() else 0
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     for spec in TABLES:
