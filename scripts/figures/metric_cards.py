@@ -26,20 +26,54 @@ GOLD = "#C9A227"
 GRAY = "#8C8C8C"
 INK = "#1A1A1A"
 
-FORMULA = (
-    r"$\mathrm{Sibling\ hit}@1 \;=\; \frac{1}{|Q|}\sum_{q \in Q}\mathbf{1}"
-    r"\left[\, r_1(q)\notin G(q)\ \wedge\ \exists\, g \in G(q):\ "
-    r"\mathrm{par}(r_1(q))=\mathrm{par}(g) \,\right]$"
-)
-LEGEND = (
-    r"$r_1(q)$ rank-1 retrieved node" "      "
-    r"$G(q)$ gold set at the granularity" "      "
-    r"$\mathrm{par}(\cdot)$ parent in the granularity tree"
-)
+# Each card is (stem, title, formula, legend). Notation is shared across cards:
+# Q query set, G(q) gold set at the granularity, D_k(q) top-k retrieved set,
+# r_1(q) rank-1 node, par(.) parent in the granularity tree.
+CARDS = [
+    (
+        "metric-map",
+        "Mean Average Precision at 10 (MAP@10), the primary metric",
+        r"$\mathrm{MAP}@10 \;=\; \frac{1}{|Q|}\sum_{q \in Q}\frac{1}{|G(q)|}"
+        r"\sum_{g \in G(q)}\mathrm{P}@\,\mathrm{rank}(g)$",
+        r"$\mathrm{P}@i = |G(q)\cap D_i(q)|/i$      "
+        r"$\mathrm{rank}(g)$ rank of gold node $g$ (0 beyond the cut-off)      "
+        r"reduces to MRR when $|G(q)|=1$",
+    ),
+    (
+        "metric-mrr",
+        "Mean Reciprocal Rank at 10 (MRR@10)",
+        r"$\mathrm{MRR}@10 \;=\; \frac{1}{|Q|}\sum_{q \in Q}\frac{1}{\mathrm{rank}_q}$",
+        r"$\mathrm{rank}_q$ rank of the first gold node within the top 10 (term is 0 if none)",
+    ),
+    (
+        "metric-recall",
+        "Recall at k (reported as R@10 and R@2)",
+        r"$\mathrm{R}@k \;=\; \frac{1}{|Q|}\sum_{q \in Q}"
+        r"\frac{|G(q)\cap D_k(q)|}{|G(q)|}$",
+        r"$D_k(q)$ top-$k$ retrieved set      $G(q)$ gold set      "
+        r"R@10 for coverage, R@2 for the two multihop anchors",
+    ),
+    (
+        "metric-hit1",
+        "Hit rate at rank 1 (H@1)",
+        r"$\mathrm{H}@1 \;=\; \frac{1}{|Q|}\sum_{q \in Q}\mathbf{1}"
+        r"\left[\, r_1(q)\in G(q) \,\right]$",
+        r"$r_1(q)$ rank-1 retrieved node      $G(q)$ gold set",
+    ),
+    (
+        "metric-sibling-hit",
+        "Sibling-hit at rank 1, near-miss diagnostic (per granularity)",
+        r"$\mathrm{Sibling\ hit}@1 \;=\; \frac{1}{|Q|}\sum_{q \in Q}\mathbf{1}"
+        r"\left[\, r_1(q)\notin G(q)\ \wedge\ \exists\, g \in G(q):\ "
+        r"\mathrm{par}(r_1(q))=\mathrm{par}(g) \,\right]$",
+        r"$r_1(q)$ rank-1 retrieved node      $G(q)$ gold set      "
+        r"$\mathrm{par}(\cdot)$ parent in the granularity tree",
+    ),
+]
 
 
-def render_formula_card(svg_dir: Path) -> None:
-    """Write the sibling-hit definition card to metric-sibling-hit.svg."""
+def _formula_card(svg_dir: Path, stem: str, title: str, formula: str, legend: str) -> None:
+    """Write one metric card (title, formula in Computer Modern, legend) to SVG."""
     plt.rcParams["font.family"] = "Arial"
     plt.rcParams["mathtext.fontset"] = "cm"
     fig = plt.figure(figsize=(9.0, 1.95))
@@ -47,18 +81,22 @@ def render_formula_card(svg_dir: Path) -> None:
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
-
     ax.add_patch(plt.Rectangle((0.012, 0.06), 0.976, 0.88, facecolor="white",
                                edgecolor="#D9D9D9", linewidth=1.1, zorder=0))
-    ax.text(0.5, 0.80, "Sibling-hit at rank 1, near-miss diagnostic (per granularity)",
-            ha="center", va="center", color=NAVY, fontsize=12, fontweight="bold", zorder=2)
-    ax.text(0.5, 0.45, FORMULA, ha="center", va="center", fontsize=17, color=INK, zorder=2)
-    ax.text(0.5, 0.16, LEGEND, ha="center", va="center", fontsize=9.5, color=GRAY, zorder=2)
-
-    out = svg_dir / "metric-sibling-hit.svg"
+    ax.text(0.5, 0.80, title, ha="center", va="center",
+            color=NAVY, fontsize=12, fontweight="bold", zorder=2)
+    ax.text(0.5, 0.45, formula, ha="center", va="center", fontsize=17, color=INK, zorder=2)
+    ax.text(0.5, 0.16, legend, ha="center", va="center", fontsize=9, color=GRAY, zorder=2)
+    out = svg_dir / f"{stem}.svg"
     fig.savefig(out, format="svg", pad_inches=0)
     plt.close(fig)
     print(f"Wrote {out}")
+
+
+def render_metric_cards(svg_dir: Path) -> None:
+    """Write a formula card for every reported metric plus the sibling diagnostic."""
+    for stem, title, formula, legend in CARDS:
+        _formula_card(svg_dir, stem, title, formula, legend)
 
 
 def _box(ax, x, y, w, h, text, face, edge, tcolor, fontsize=8.5, lw=1.2, bold=False):
@@ -133,7 +171,7 @@ def main() -> int:
     args = ap.parse_args()
     if args.svg_dir:
         svg = Path(args.svg_dir)
-        render_formula_card(svg)
+        render_metric_cards(svg)
         render_sibling_example(svg, "svg")
     if args.out:
         render_sibling_example(Path(args.out), "pdf")
