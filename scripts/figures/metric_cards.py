@@ -41,13 +41,24 @@ LEGEND = (
 def render_formula_card(svg_dir: Path) -> None:
     """Write the sibling-hit definition card to metric-sibling-hit.svg."""
     plt.rcParams["font.family"] = "Arial"
-    fig = plt.figure(figsize=(9.4, 1.9))
-    fig.text(0.5, 0.82, "Sibling-hit at rank 1, a near-miss diagnostic (per granularity)",
-             ha="center", va="center", fontsize=13, fontweight="bold", color=NAVY)
-    fig.text(0.5, 0.50, FORMULA, ha="center", va="center", fontsize=15, color=INK)
-    fig.text(0.5, 0.15, LEGEND, ha="center", va="center", fontsize=9.5, color=GRAY)
+    plt.rcParams["mathtext.fontset"] = "stixsans"
+    fig = plt.figure(figsize=(9.0, 2.0))
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    ax.add_patch(plt.Rectangle((0.015, 0.05), 0.97, 0.90, facecolor="white",
+                               edgecolor="#D9D9D9", linewidth=1.2, zorder=0))
+    ax.add_patch(plt.Rectangle((0.015, 0.70), 0.97, 0.25, facecolor=NAVY,
+                               edgecolor="none", zorder=1))
+    ax.text(0.5, 0.825, "Sibling-hit at rank 1, near-miss diagnostic (per granularity)",
+            ha="center", va="center", color="white", fontsize=12.5, fontweight="bold", zorder=2)
+    ax.text(0.5, 0.45, FORMULA, ha="center", va="center", fontsize=15.5, color=INK, zorder=2)
+    ax.text(0.5, 0.165, LEGEND, ha="center", va="center", fontsize=9.5, color=GRAY, zorder=2)
+
     out = svg_dir / "metric-sibling-hit.svg"
-    fig.savefig(out, format="svg", bbox_inches="tight", pad_inches=0.18)
+    fig.savefig(out, format="svg", pad_inches=0)
     plt.close(fig)
     print(f"Wrote {out}")
 
