@@ -76,8 +76,8 @@ def main() -> int:
         "completed_at": stamp,
         "note": "Paired tests for the Stage 3 comparison, "
                 "vectorless minus vector, errors counted as zero.",
-        "side_a": "tuned hybrid-tree, pasal, test",
-        "side_b": "tuned BGE-M3 + BGE v2 M3 + QE, pasal, test",
+        "side_a": "optimized hybrid-tree, pasal, test",
+        "side_b": "optimized BGE-M3 + BGE v2 M3 + QE, pasal, test",
         "B": B,
         "seed": SEED,
         "comparisons": [paired(vl_test, vec_test, m) for m in TEST_METRICS],

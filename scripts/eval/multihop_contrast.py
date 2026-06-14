@@ -8,7 +8,7 @@ retrieval failures (at least one gold provision absent from the result list).
 
 The permutation test shuffles the subset label across the paired per-query
 differences. Errors count as zero, matching the thesis reporting convention.
-Reported in Chapter 4 Section 4.5 (run a = tuned hybrid-tree, run b = tuned
+Reported in Chapter 4 Section 4.5 (run a = optimized hybrid-tree, run b = optimized
 BGE-M3 with reranker and query expansion).
 
 Usage:

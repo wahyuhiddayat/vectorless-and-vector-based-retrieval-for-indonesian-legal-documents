@@ -180,7 +180,7 @@ TABLES = [
              "Identify the best configuration\nfrom each paradigm"],
             ["2", "The two best Stage 1\nconfigurations", "Dev (357)",
              "Optimize hyperparameters, model\ncapacity, and query expansion"],
-            ["3", "The two tuned configurations", "Test (356)",
+            ["3", "The two optimized configurations", "Test (356)",
              "Compare the paradigms on unseen\nqueries and measure cost"],
         ],
     },
@@ -284,10 +284,10 @@ TABLES = [
             ["", "expanded query", "0.8974", "0.9804", "2.68"],
         ],
     },
-    # Source: tab:test-winners (bab4.tex), the two tuned configurations on the test partition.
+    # Source: tab:test-winners (bab4.tex), the two optimized configurations on the test partition.
     {
         "stem": "tab-test-winners",
-        "headers": ["Metric", "Vectorless (tuned hybrid-tree)", "Vector (tuned BGE-M3 + reranker + QE)"],
+        "headers": ["Metric", "Vectorless (optimized hybrid-tree)", "Vector (optimized BGE-M3 + reranker + QE)"],
         "rows": [
             ["MAP@10", "0.9489", "0.8750"],
             ["R@2", "0.9466", "0.8834"],
@@ -319,10 +319,10 @@ TABLES = [
             ["Rincian", "0.0756", "0.1092"],
         ],
     },
-    # Source: tab:cost-test (bab4.tex), per-query cost of the tuned configurations.
+    # Source: tab:cost-test (bab4.tex), per-query cost of the optimized configurations.
     {
         "stem": "tab-cost-test",
-        "headers": ["Metric", "Vectorless (tuned hybrid-tree)", "Vector (tuned BGE-M3 + reranker + QE)"],
+        "headers": ["Metric", "Vectorless (optimized hybrid-tree)", "Vector (optimized BGE-M3 + reranker + QE)"],
         "rows": [
             ["MAP@10", "0.9489", "0.8750"],
             ["LLM calls", "2.0", "1.0"],
@@ -491,10 +491,10 @@ TABLES = [
             ["2.0", "0.9860", "0.9902", "0.9902", "0.9916", "0.9902"],
         ],
     },
-    # Source: tab:tuned-dev (bab4.tex), the two tuned configurations on the development partition.
+    # Source: tab:tuned-dev (bab4.tex), the two optimized configurations on the development partition.
     {
         "stem": "tab-tuned-dev",
-        "headers": ["Item", "Vectorless (tuned hybrid-tree)", "Vector (tuned BGE-M3 + reranker + QE)"],
+        "headers": ["Item", "Vectorless (optimized hybrid-tree)", "Vector (optimized BGE-M3 + reranker + QE)"],
         "rows": [
             ["Candidates and picks", "candidate 20, document-pick 5", "depth 100, ef 64"],
             ["Model and query", "deepseek-v4-pro, original query", "BGE v2 M3, expanded query"],
