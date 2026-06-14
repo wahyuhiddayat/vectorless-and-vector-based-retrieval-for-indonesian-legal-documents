@@ -1,7 +1,7 @@
 """Render the thesis-defense result tables as styled SVGs.
 
-The defense slides reuse condensed versions of the Chapter 3 and Chapter 4
-tables. Building them by hand in the slide editor is slow and the default
+The defense slides reuse the Chapter 3, Chapter 4, and appendix tables, some
+condensed. Building them by hand in the slide editor is slow and the default
 tables are bulky, so this script renders each one as an SVG that matches the
 deck style, a dark navy header with white text over white body rows. Headers
 are kept on a single line and column widths are measured from the text, so
@@ -28,26 +28,38 @@ from matplotlib.font_manager import FontProperties
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DECK_SVG = REPO_ROOT.parents[1] / "05 Thesis Defense" / "Assets" / "svg"
-THESIS_BODY = REPO_ROOT.parents[1] / "laporan-skripsi" / "src" / "01-body"
+THESIS_SRC = REPO_ROOT.parents[1] / "laporan-skripsi" / "src"
 
 # Maps each table stem to the source thesis table it was transcribed from, used
-# by --verify to confirm every number in a spec appears in that table.
+# by --verify to confirm every number in a spec appears in that table. Paths are
+# relative to the thesis src directory.
 SOURCE_TABLE = {
-    "tab-vectorless-methods": ("bab3.tex", "tab:vectorless-methods"),
-    "tab-vector-config": ("bab3.tex", "tab:vector-config"),
-    "tab-stages": ("bab3.tex", "tab:stages"),
-    "tab-vl-stage1": ("bab4.tex", "tab:vl-stage1"),
-    "tab-vl-stage1-full": ("bab4.tex", "tab:vl-stage1"),
-    "tab-tree-decomp": ("bab4.tex", "tab:tree-decomp"),
-    "tab-vec-stage1": ("bab4.tex", "tab:vec-stage1"),
-    "tab-vec-stage1-full": ("bab4.tex", "tab:vec-stage1"),
-    "tab-winners": ("bab4.tex", "tab:winners"),
-    "tab-vl-tuning": ("bab4.tex", "tab:vl-tuning"),
-    "tab-vec-tuning": ("bab4.tex", "tab:vec-tuning"),
-    "tab-test-winners": ("bab4.tex", "tab:test-winners"),
-    "tab-test-sig": ("bab4.tex", "tab:test-sig"),
-    "tab-sibling": ("bab4.tex", "tab:sibling"),
-    "tab-cost-test": ("bab4.tex", "tab:cost-test"),
+    "tab-vectorless-methods": ("01-body/bab3.tex", "tab:vectorless-methods"),
+    "tab-vector-config": ("01-body/bab3.tex", "tab:vector-config"),
+    "tab-stages": ("01-body/bab3.tex", "tab:stages"),
+    "tab-corpus-stats": ("01-body/bab3.tex", "tab:corpus-stats"),
+    "tab-query-examples": ("01-body/bab3.tex", "tab:query-examples"),
+    "tab-models": ("01-body/bab3.tex", "tab:models"),
+    "tab-vl-stage1": ("01-body/bab4.tex", "tab:vl-stage1"),
+    "tab-vl-stage1-full": ("01-body/bab4.tex", "tab:vl-stage1"),
+    "tab-tree-decomp": ("01-body/bab4.tex", "tab:tree-decomp"),
+    "tab-vl-bytype": ("01-body/bab4.tex", "tab:vl-bytype"),
+    "tab-vec-stage1": ("01-body/bab4.tex", "tab:vec-stage1"),
+    "tab-vec-stage1-full": ("01-body/bab4.tex", "tab:vec-stage1"),
+    "tab-vec-bytype": ("01-body/bab4.tex", "tab:vec-bytype"),
+    "tab-winners": ("01-body/bab4.tex", "tab:winners"),
+    "tab-vl-tuning": ("01-body/bab4.tex", "tab:vl-tuning"),
+    "tab-vec-tuning": ("01-body/bab4.tex", "tab:vec-tuning"),
+    "tab-bm25-grid": ("01-body/bab4.tex", "tab:bm25-grid"),
+    "tab-tuned-dev": ("01-body/bab4.tex", "tab:tuned-dev"),
+    "tab-test-winners": ("01-body/bab4.tex", "tab:test-winners"),
+    "tab-test-sig": ("01-body/bab4.tex", "tab:test-sig"),
+    "tab-sibling": ("01-body/bab4.tex", "tab:sibling"),
+    "tab-cost-dev": ("01-body/bab4.tex", "tab:cost-dev"),
+    "tab-cost-test": ("01-body/bab4.tex", "tab:cost-test"),
+    "tab-appendix-test-bytype": ("99-backMatter/appendix-test-tables.tex", "tab:appendix-test-bytype"),
+    "tab-appendix-effect-size": ("99-backMatter/appendix-test-tables.tex", "tab:appendix-effect-size"),
+    "tab-appendix-indexing": ("99-backMatter/appendix-indexing-tables.tex", "tab:appendix-indexing"),
 }
 
 HEADER_COLOR = "#0D2D44"
@@ -382,6 +394,181 @@ TABLES = [
             ["NusaBERT", "none", "Rincian", "0.4751", "0.4524", "0.6849", "0.5294", "0.4230", "0.26"],
         ],
     },
+    # Source: tab:corpus-stats (bab3.tex), indexed corpus statistics by granularity.
+    {
+        "stem": "tab-corpus-stats",
+        "headers": ["Statistic", "Pasal", "Ayat", "Rincian"],
+        "rows": [
+            ["Leaf count", "7,271", "18,205", "38,006"],
+            ["Mean leaves per document", "23.6", "59.1", "123.4"],
+            ["Mean text length (chars)", "759", "299", "126"],
+            ["Median text length (chars)", "498", "196", "106"],
+            ["p95 text length (chars)", "2,224", "747", "309"],
+            ["p99 text length (chars)", "4,485", "2,242", "450"],
+            ["Max text length (chars)", "11,222", "11,222", "3,128"],
+            ["Mean tree depth (levels)", "2.59", "3.57", "4.86"],
+            ["p95 tree depth (levels)", "4", "5", "6"],
+            ["Max tree depth (levels)", "5", "6", "7"],
+            ["Mean branching factor (children per node)", "17.7", "30.0", "41.3"],
+            ["p95 branching factor (children per node)", "43", "80", "115"],
+            ["Max branching factor (children per node)", "108", "193", "340"],
+        ],
+    },
+    # Source: tab:query-examples (bab3.tex), one query of each type with its gold provision.
+    {
+        "stem": "tab-query-examples",
+        "headers": ["Type", "Query", "Gold provision"],
+        "rows": [
+            ["Factual",
+             "Kalau sebuah UPT dapat nilai di bawah\n0,562, masuk kategori apa namanya?",
+             "Permendikbudristek No. 46 Tahun 2024,\nPasal 10 ayat (2) huruf b"],
+            ["Paraphrased",
+             "Berapa lama masa kerja anggota KNKI\ndan apakah mereka bisa dipilih ulang?",
+             "Permendikbud No. 35 Tahun 2020,\nPasal 10 ayat (3)"],
+            ["Multihop",
+             "Berapa jumlah anggota KNKI yang berasal\ndari unsur pakar dan apa kompetensi\nyang harus mereka kuasai?",
+             "Permendikbud No. 35 Tahun 2020,\nPasal 10 ayat (2) huruf c and\nPasal 11 ayat (1) huruf b"],
+        ],
+    },
+    # Source: tab:models (bab3.tex), model assignments by pipeline role.
+    {
+        "stem": "tab-models",
+        "headers": ["Role", "Model", "Provider"],
+        "rows": [
+            ["Structural parser", "gpt-5", "OpenAI"],
+            ["Parser judge", "gemini-2.5-pro", "Google"],
+            ["Summary and text repair", "gemini-2.5-flash-lite", "Google"],
+            ["Retrieval LLM (default)", "deepseek-v4-flash", "DeepSeek"],
+            ["Retrieval LLM (upgrade)", "deepseek-v4-pro", "DeepSeek"],
+            ["Query expansion", "deepseek-v4-flash", "DeepSeek"],
+            ["Ground-truth annotator", "claude-sonnet-4-6", "Anthropic"],
+            ["Ground-truth judge", "gpt-5", "OpenAI"],
+        ],
+    },
+    # Source: tab:vl-bytype (bab4.tex), vectorless results by query type at pasal.
+    {
+        "stem": "tab-vl-bytype",
+        "headers": ["Method", "Factual MAP@10", "Factual R@10", "Paraphrased MAP@10",
+                    "Paraphrased R@10", "Multihop MAP@10", "Multihop R@2"],
+        "rows": [
+            ["bm25-flat", "0.8386", "0.9837", "0.5306", "0.7190", "0.7141", "0.6416"],
+            ["bm25-tree", "0.6803", "0.7642", "0.3770", "0.6033", "0.6193", "0.5531"],
+            ["hybrid-flat", "0.9851", "1.0000", "0.7586", "0.7934", "0.9442", "0.9204"],
+            ["hybrid-tree", "0.9553", "0.9675", "0.8287", "0.8595", "0.9078", "0.8982"],
+            ["llm-flat", "0.9222", "0.9512", "0.8669", "0.9008", "0.8609", "0.8230"],
+            ["llm-tree", "0.9106", "0.9187", "0.8609", "0.8926", "0.8886", "0.8805"],
+        ],
+    },
+    # Source: tab:vec-bytype (bab4.tex), vector results by query type at pasal.
+    {
+        "stem": "tab-vec-bytype",
+        "headers": ["Embedding", "Reranker", "Factual MAP@10", "Factual R@10", "Paraphrased MAP@10",
+                    "Paraphrased R@10", "Multihop MAP@10", "Multihop R@2"],
+        "rows": [
+            ["BGE-M3", "none", "0.8493", "1.0000", "0.7944", "0.9008", "0.7358", "0.6460"],
+            ["BGE-M3", "BGE v2 M3", "0.9546", "1.0000", "0.8533", "0.9587", "0.8583", "0.7876"],
+            ["BGE-M3", "Qwen3 0.6B", "0.8700", "1.0000", "0.7873", "0.9339", "0.8186", "0.7434"],
+            ["Multilingual E5", "none", "0.8270", "0.9837", "0.7744", "0.9504", "0.7312", "0.6593"],
+            ["Multilingual E5", "BGE v2 M3", "0.9627", "1.0000", "0.8429", "0.9421", "0.8518", "0.7876"],
+            ["Multilingual E5", "Qwen3 0.6B", "0.8930", "1.0000", "0.7710", "0.9339", "0.8183", "0.7522"],
+            ["NusaBERT", "none", "0.6510", "0.8618", "0.5689", "0.8430", "0.5833", "0.5265"],
+            ["NusaBERT", "BGE v2 M3", "0.8584", "0.9187", "0.7985", "0.8926", "0.7560", "0.7212"],
+            ["NusaBERT", "Qwen3 0.6B", "0.7915", "0.9106", "0.7294", "0.8760", "0.7317", "0.6858"],
+        ],
+    },
+    # Source: tab:bm25-grid (bab4.tex), candidate recall over the BM25 weighting grid.
+    {
+        "stem": "tab-bm25-grid",
+        "headers": ["k1", "b = 0.0", "b = 0.25", "b = 0.5", "b = 0.75", "b = 1.0"],
+        "rows": [
+            ["0.5", "0.9860", "0.9888", "0.9902", "0.9902", "0.9888"],
+            ["0.8", "0.9860", "0.9888", "0.9902", "0.9902", "0.9888"],
+            ["1.0", "0.9860", "0.9888", "0.9902", "0.9916", "0.9888"],
+            ["1.2", "0.9860", "0.9888", "0.9902", "0.9916", "0.9888"],
+            ["1.5", "0.9860", "0.9888", "0.9902", "0.9916", "0.9888"],
+            ["1.8", "0.9860", "0.9888", "0.9902", "0.9916", "0.9916"],
+            ["2.0", "0.9860", "0.9902", "0.9902", "0.9916", "0.9902"],
+        ],
+    },
+    # Source: tab:tuned-dev (bab4.tex), the two tuned configurations on the development partition.
+    {
+        "stem": "tab-tuned-dev",
+        "headers": ["Item", "Vectorless (tuned hybrid-tree)", "Vector (tuned BGE-M3 + reranker + QE)"],
+        "rows": [
+            ["Candidates and picks", "candidate 20, document-pick 5", "depth 100, ef 64"],
+            ["Model and query", "deepseek-v4-pro, original query", "BGE v2 M3, expanded query"],
+            ["MAP@10", "0.9516", "0.8974"],
+            ["R@2", "0.9566", "0.8852"],
+            ["R@10", "0.9790", "0.9804"],
+            ["MRR@10", "0.9556", "0.9243"],
+            ["H@1", "0.9356", "0.8824"],
+        ],
+    },
+    # Source: tab:cost-dev (bab4.tex), per-query cost of the pasal-level configurations.
+    {
+        "stem": "tab-cost-dev",
+        "headers": ["Configuration", "MAP@10", "LLM calls", "LLM tokens", "Latency (s)"],
+        "rows": [
+            ["bm25-tree", "0.5582", "0", "0", "0.09"],
+            ["NusaBERT without reranker", "0.6017", "0", "0", "0.11"],
+            ["bm25-flat", "0.6948", "0", "0", "0.49"],
+            ["NusaBERT + Qwen3 0.6B", "0.7515", "0", "0", "2.23"],
+            ["E5 without reranker", "0.7788", "0", "0", "0.11"],
+            ["BGE-M3 without reranker", "0.7948", "0", "0", "0.12"],
+            ["NusaBERT + BGE v2 M3", "0.8057", "0", "0", "1.02"],
+            ["BGE-M3 + Qwen3 0.6B", "0.8257", "0", "0", "3.69"],
+            ["E5 + Qwen3 0.6B", "0.8280", "0", "0", "3.08"],
+            ["llm-flat", "0.8840", "2.0", "877,530", "13.13"],
+            ["llm-tree", "0.8868", "4.2", "143,741", "11.09"],
+            ["E5 + BGE v2 M3", "0.8870", "0", "0", "1.35"],
+            ["BGE-M3 + BGE v2 M3", "0.8898", "0", "0", "1.70"],
+            ["hybrid-flat", "0.8954", "1.0", "10,684", "6.71"],
+            ["hybrid-tree", "0.8974", "2.0", "138,055", "13.84"],
+        ],
+    },
+    # Source: tab:appendix-test-bytype (appendix-test-tables.tex), test results by query type.
+    {
+        "stem": "tab-appendix-test-bytype",
+        "headers": ["Query type", "Configuration", "MAP@10", "R@2", "R@10", "MRR@10", "H@1", "Latency (s)"],
+        "rows": [
+            ["Factual", "Vectorless", "0.9898", "1.0000", "1.0000", "0.9898", "0.9796", "41.38"],
+            ["", "Vector", "0.9284", "0.9660", "1.0000", "0.9284", "0.8707", "2.68"],
+            ["Paraphrased", "Vectorless", "0.8905", "0.9083", "0.9633", "0.8905", "0.8440", "45.80"],
+            ["", "Vector", "0.8335", "0.8624", "0.9633", "0.8335", "0.7615", "2.52"],
+            ["Multihop", "Vectorless", "0.9523", "0.9100", "1.0000", "0.9750", "0.9600", "40.31"],
+            ["", "Vector", "0.8418", "0.7850", "0.9650", "0.9475", "0.9000", "2.87"],
+        ],
+    },
+    # Source: tab:appendix-effect-size (appendix-test-tables.tex), test-partition effect sizes.
+    {
+        "stem": "tab-appendix-effect-size",
+        "headers": ["Metric", "Difference", "p-value", "Cohen's d", "Magnitude"],
+        "rows": [
+            ["MAP@10", "+0.0738", "0.0001", "0.27", "Small"],
+            ["R@2", "+0.0632", "0.0001", "0.21", "Small"],
+            ["R@10", "+0.0098", "0.2881", "0.07", "Very small"],
+            ["MRR@10", "+0.0505", "0.0008", "0.19", "Very small"],
+            ["H@1", "+0.0871", "0.0002", "0.20", "Small"],
+            ["R@2 (multihop)", "+0.1603", "0.0001", "0.56", "Medium"],
+        ],
+    },
+    # Source: tab:appendix-indexing (appendix-indexing-tables.tex), indexing token cost by stage.
+    {
+        "stem": "tab-appendix-indexing",
+        "headers": ["Processing stage", "Tokens"],
+        "rows": [
+            ["Shared by both paradigms", ""],
+            ["   Structural parsing", "16,338,374"],
+            ["   Text repair", "10,650,421"],
+            ["Subtotal, shared", "26,988,795"],
+            ["Vectorless paradigm only, summary annotation", ""],
+            ["   pasal", "7,644,211"],
+            ["   ayat", "15,376,566"],
+            ["   rincian", "27,026,219"],
+            ["Subtotal, vectorless-specific", "50,046,996"],
+            ["Total", "77,035,791"],
+        ],
+    },
 ]
 
 
@@ -411,7 +598,7 @@ def verify_numbers() -> int:
     for spec in TABLES:
         fname, label = SOURCE_TABLE[spec["stem"]]
         if fname not in files:
-            files[fname] = (THESIS_BODY / fname).read_text(encoding="utf-8")
+            files[fname] = (THESIS_SRC / fname).read_text(encoding="utf-8")
         source = _numbers(_source_block(files[fname], label))
         spec_nums: set[str] = set()
         for row in spec["rows"]:

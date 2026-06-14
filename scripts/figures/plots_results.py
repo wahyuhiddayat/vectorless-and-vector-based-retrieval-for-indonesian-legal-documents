@@ -93,7 +93,7 @@ def vec_records(gran: str, emb: str, rer: str) -> list[dict]:
     return load_records(rel)
 
 
-def plot_granularity(out: Path) -> None:
+def plot_granularity(out: Path, fmt: str = "pdf") -> None:
     """Grouped bars, MAP@10 by vectorless method and granularity."""
     methods = ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]
     # Extra horizontal gap between the lexical, hybrid, and LLM-based pairs
@@ -117,11 +117,11 @@ def plot_granularity(out: Path) -> None:
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
     fig.tight_layout()
-    fig.savefig(out / "vl-granularity.pdf")
+    fig.savefig(out / f"vl-granularity.{fmt}")
     plt.close(fig)
 
 
-def plot_bytype(out: Path) -> None:
+def plot_bytype(out: Path, fmt: str = "pdf") -> None:
     """Grouped bars, MAP@10 by query type for the leading config of each paradigm."""
     configs = [
         ("Vectorless\n(hybrid-tree)", lambda: vl_records("hybrid-tree", "pasal")),
@@ -150,11 +150,11 @@ def plot_bytype(out: Path) -> None:
     ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
     fig.tight_layout()
-    fig.savefig(out / "bytype.pdf")
+    fig.savefig(out / f"bytype.{fmt}")
     plt.close(fig)
 
 
-def plot_cost(out: Path) -> None:
+def plot_cost(out: Path, fmt: str = "pdf") -> None:
     """Two-panel cost-effectiveness scatter, MAP@10 against latency and tokens.
 
     Effectiveness shares the vertical axis across both panels. The left panel
@@ -224,11 +224,11 @@ def plot_cost(out: Path) -> None:
     handles, labels = axR.get_legend_handles_labels()
     axR.legend(handles, labels, frameon=False, loc="lower right", fontsize=7)
     fig.tight_layout()
-    fig.savefig(out / "cost-scatter.pdf")
+    fig.savefig(out / f"cost-scatter.{fmt}")
     plt.close(fig)
 
 
-def plot_tuning(out: Path) -> None:
+def plot_tuning(out: Path, fmt: str = "pdf") -> None:
     """Line plot, best-so-far MAP@10 across the four aligned Stage 2 tuning stages.
 
     Each paradigm follows the same four-stage shape, baseline, hyperparameter
@@ -272,7 +272,7 @@ def plot_tuning(out: Path) -> None:
     ax.set_xlim(-0.35, len(stages) - 0.65)
     ax.legend(frameon=False, loc="upper left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(out / "tuning-trajectory.pdf")
+    fig.savefig(out / f"tuning-trajectory.{fmt}")
     plt.close(fig)
 
 
@@ -384,9 +384,13 @@ def main() -> int:
     if args.svg_dir:
         svg_dir = Path(args.svg_dir)
         svg_dir.mkdir(parents=True, exist_ok=True)
+        plot_granularity(svg_dir, fmt="svg")
+        plot_bytype(svg_dir, fmt="svg")
+        plot_cost(svg_dir, fmt="svg")
+        plot_tuning(svg_dir, fmt="svg")
         plot_emb_reranker_heatmap(svg_dir, fmt="svg")
         plot_vec_granularity(svg_dir, fmt="svg")
-        print(f"Wrote 2 SVG slide figures to {svg_dir}")
+        print(f"Wrote 6 SVG slide figures to {svg_dir}")
     return 0
 
 
