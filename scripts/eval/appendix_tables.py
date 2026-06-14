@@ -303,7 +303,7 @@ def indexing_table(out) -> None:
     out.append(r"  \footnotesize")
     out.append(r"  \caption{Indexing token cost by stage and granularity.}")
     out.append(r"  \label{tab:appendix-indexing}")
-    out.append(r"  \begin{tabular}{@{}ll|r@{}}")
+    out.append(r"  \begin{tabular*}{0.66\textwidth}{@{\extracolsep{\fill}}ll|r@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Cost} & \textbf{Stage} & \textbf{Tokens} \\")
     out.append(r"    \midrule")
@@ -318,7 +318,7 @@ def indexing_table(out) -> None:
     out.append(r"    \midrule")
     out.append("    \\multicolumn{2}{@{}l|}{\\textbf{Total}} & \\textbf{%s} \\\\" % fmt_int(total))
     out.append(r"    \bottomrule")
-    out.append(r"  \end{tabular}")
+    out.append(r"  \end{tabular*}")
     out.append(r"\end{table}")
     out.append("")
 
