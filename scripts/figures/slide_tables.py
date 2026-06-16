@@ -24,11 +24,24 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 from matplotlib.font_manager import FontProperties
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DECK_SVG = REPO_ROOT.parents[1] / "05 Thesis Defense" / "Assets" / "svg"
 THESIS_SRC = REPO_ROOT.parents[1] / "laporan-skripsi" / "src"
+
+# The deck renders these tables outlined in Inter, so measure and lay them out
+# in Inter too. Otherwise column widths are sized to Arial, which is narrower,
+# and long cells overflow once the outline step swaps in Inter. Fall back to
+# Arial when the Inter files are not present.
+_FONT_DIR = REPO_ROOT.parents[1] / "05 Thesis Defense" / "Assets" / "figure-sources"
+FONT_FAMILY = "Arial"
+for _f in ("Inter-Regular.ttf", "Inter-Bold.ttf"):
+    _p = _FONT_DIR / _f
+    if _p.exists():
+        font_manager.fontManager.addfont(str(_p))
+        FONT_FAMILY = "Inter"
 
 # Maps each table stem to the source thesis table it was transcribed from, used
 # by --verify to confirm every number in a spec appears in that table. Paths are
@@ -79,8 +92,8 @@ def _column_widths(headers: list[str], rows: list[list[str]], fontsize: float) -
     """Inch width per column, sized to the widest header or body line plus padding."""
     probe = plt.figure()
     renderer = probe.canvas.get_renderer()
-    header_font = FontProperties(family="Arial", size=fontsize, weight="bold")
-    body_font = FontProperties(family="Arial", size=fontsize, weight="normal")
+    header_font = FontProperties(family=FONT_FAMILY, size=fontsize, weight="bold")
+    body_font = FontProperties(family=FONT_FAMILY, size=fontsize, weight="normal")
     widths = []
     for c in range(len(headers)):
         header_w = _line_width(headers[c], header_font, renderer, probe.dpi)
@@ -100,7 +113,7 @@ def render_table(headers: list[str], rows: list[list[str]], out_path: Path,
     format follows the file extension of out_path, so an .svg path writes SVG
     with selectable text and a .png path writes a raster preview.
     """
-    plt.rcParams.update({"font.family": "Arial", "svg.fonttype": "none"})
+    plt.rcParams.update({"font.family": FONT_FAMILY, "svg.fonttype": "none"})
     bold = set(bold_rows or [])
 
     col_widths = _column_widths(headers, rows, fontsize)
