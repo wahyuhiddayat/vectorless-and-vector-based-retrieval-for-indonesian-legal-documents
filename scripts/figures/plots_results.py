@@ -160,41 +160,58 @@ def plot_cost(out: Path, fmt: str = "pdf") -> None:
     Effectiveness shares the vertical axis across both panels. The left panel
     plots mean per-query latency on a log axis, the right panel plots mean
     per-query LLM tokens on a symlog axis so the token-free configurations sit
-    honestly at zero. Vectorless methods are red circles, vector configurations
-    are blue markers grouped by reranker, since the reranker rather than the
-    embedding determines their cost. Only the token-spending methods are
-    labeled, in the token panel, and the rest are carried by the legend.
+    honestly at zero. Both paradigms are differentiated by method family using
+    marker shape: vectorless by BM25 / Hybrid / LLM-based (v, o, P) and vector
+    by reranker class (D, s, ^), since the reranker determines vector cost just
+    as the method family determines vectorless cost. Color separates paradigms
+    (red = vectorless, blue = vector). All six vectorless methods are labeled
+    in the latency panel; only the four token-spending methods are labeled in
+    the token panel where they spread out horizontally.
     """
-    vl_methods = ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]
+    vl_families = [
+        (["bm25-flat", "bm25-tree"], "v", "Vectorless (BM25)"),
+        (["hybrid-flat", "hybrid-tree"], "o", "Vectorless (Hybrid)"),
+        (["llm-flat", "llm-tree"], "P", "Vectorless (LLM-based)"),
+    ]
     embeds = ["bge-m3", "multilingual-e5-large-instruct", "all-nusabert-large-v4"]
     reranker_classes = [
         ("none", "Vector, no reranker", "D"),
         ("bge-reranker-v2-m3", "Vector + BGE v2 M3", "s"),
         ("qwen3-reranker-0.6b", "Vector + Qwen3 0.6B", "^"),
     ]
-    # Labels go in the token panel, where the four token-spending methods spread out.
+    # Labels for the latency panel: all 6 vectorless methods identified by name.
+    latency_labels = {
+        "bm25-flat":   (0, -15, "center"),
+        "bm25-tree":   (0,   9, "center"),
+        "hybrid-flat": (-8,  6, "right"),
+        "hybrid-tree": ( 8,  6, "left"),
+        "llm-tree":    (-8, -15, "right"),
+        "llm-flat":    ( 8, -15, "left"),
+    }
+    # Labels for the token panel: only the 4 token-spending methods spread out.
     token_labels = {
         "hybrid-flat": (0, -15, "center"),
-        "hybrid-tree": (0, 9, "center"),
-        "llm-tree": (10, -15, "left"),
-        "llm-flat": (0, 9, "center"),
+        "hybrid-tree": (0,   9, "center"),
+        "llm-tree":    (10, -15, "left"),
+        "llm-flat":    (0,   9, "center"),
     }
 
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(6.6, 3.3), sharey=True)
 
-    def draw(ax, xkey, do_labels):
+    def draw(ax, xkey, labels=None):
         """Plot one cost-versus-MAP@10 panel on ax, using xkey as the x-axis metric."""
-        first = True
-        for method in vl_methods:
-            rows = vl_records(method, "pasal")
-            x, y = mean(rows, xkey), mean(rows, "map@10")
-            ax.scatter(x, y, s=52, color=UIRED, marker="o", edgecolor="white",
-                       linewidth=0.6, zorder=3, label="Vectorless" if first else None)
-            first = False
-            if do_labels and method in token_labels:
-                dx, dy, ha = token_labels[method]
-                ax.annotate(method, (x, y), textcoords="offset points", xytext=(dx, dy),
-                            ha=ha, fontsize=7.5, color="#333333")
+        for methods, marker, legend_label in vl_families:
+            first = True
+            for method in methods:
+                rows = vl_records(method, "pasal")
+                x, y = mean(rows, xkey), mean(rows, "map@10")
+                ax.scatter(x, y, s=52, color=UIRED, marker=marker, edgecolor="white",
+                           linewidth=0.6, zorder=3, label=legend_label if first else None)
+                first = False
+                if labels and method in labels:
+                    dx, dy, ha = labels[method]
+                    ax.annotate(method, (x, y), textcoords="offset points", xytext=(dx, dy),
+                                ha=ha, fontsize=7.5, color="#333333")
         for rer_key, rer_label, marker in reranker_classes:
             first = True
             for emb in embeds:
@@ -204,8 +221,8 @@ def plot_cost(out: Path, fmt: str = "pdf") -> None:
                            linewidth=0.6, zorder=3, label=rer_label if first else None)
                 first = False
 
-    draw(axL, "elapsed_s", do_labels=False)
-    draw(axR, "total_tokens", do_labels=True)
+    draw(axL, "elapsed_s", labels=latency_labels)
+    draw(axR, "total_tokens", labels=token_labels)
 
     axL.set_xscale("log")
     axL.set_xticks([0.1, 1, 10])
