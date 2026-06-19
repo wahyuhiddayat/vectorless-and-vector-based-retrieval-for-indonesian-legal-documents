@@ -70,9 +70,9 @@ SOURCE_TABLE = {
     "tab-sibling": ("01-body/bab4.tex", "tab:sibling"),
     "tab-cost-dev": ("01-body/bab4.tex", "tab:cost-dev"),
     "tab-cost-test": ("01-body/bab4.tex", "tab:cost-test"),
-    "tab-appendix-test-bytype": ("99-backMatter/appendix-test-tables.tex", "tab:appendix-test-bytype"),
-    "tab-appendix-effect-size": ("99-backMatter/appendix-test-tables.tex", "tab:appendix-effect-size"),
-    "tab-appendix-indexing": ("99-backMatter/appendix-indexing-tables.tex", "tab:appendix-indexing"),
+    "tab-appendix-test-bytype": ("99-backMatter/lampiran-test-tables.tex", "tab:appendix-test-bytype"),
+    "tab-appendix-effect-size": ("99-backMatter/lampiran-test-tables.tex", "tab:appendix-effect-size"),
+    "tab-appendix-indexing": ("99-backMatter/lampiran-indexing-tables.tex", "tab:appendix-indexing"),
 }
 
 HEADER_COLOR = "#0D2D44"
@@ -540,7 +540,7 @@ TABLES = [
             ["hybrid-tree", "0.8974", "2.0", "138,055", "13.84"],
         ],
     },
-    # Source: tab:appendix-test-bytype (appendix-test-tables.tex), test results by query type.
+    # Source: tab:appendix-test-bytype (lampiran-test-tables.tex), test results by query type.
     {
         "stem": "tab-appendix-test-bytype",
         "headers": ["Query type", "Configuration", "MAP@10", "R@2", "R@10", "MRR@10", "H@1", "Latency (s)"],
@@ -553,7 +553,7 @@ TABLES = [
             ["", "Vector", "0.8418", "0.7850", "0.9650", "0.9475", "0.9000", "2.87"],
         ],
     },
-    # Source: tab:appendix-effect-size (appendix-test-tables.tex), test-partition effect sizes.
+    # Source: tab:appendix-effect-size (lampiran-test-tables.tex), test-partition effect sizes.
     {
         "stem": "tab-appendix-effect-size",
         "headers": ["Metric", "Difference", "p-value", "Cohen's d", "Magnitude"],
@@ -566,7 +566,7 @@ TABLES = [
             ["R@2 (multihop)", "+0.1603", "0.0001", "0.56", "Medium"],
         ],
     },
-    # Source: tab:appendix-indexing (appendix-indexing-tables.tex), indexing token cost by stage.
+    # Source: tab:appendix-indexing (lampiran-indexing-tables.tex), indexing token cost by stage.
     {
         "stem": "tab-appendix-indexing",
         "headers": ["Processing stage", "Tokens"],
