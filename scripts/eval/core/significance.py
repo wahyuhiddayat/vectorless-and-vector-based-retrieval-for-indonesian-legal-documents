@@ -1,8 +1,10 @@
-"""Statistical significance tests for paired between-system comparison.
+"""Statistical significance tests for between-system comparison.
 
-Two tests are reported. Paired randomization is the primary, with no
-normality assumption. Paired t-test is the secondary. Effect size is
-Cohen's d for paired samples.
+Paired randomization is the primary test, with no normality assumption.
+The paired t-test is the secondary. Effect size is Cohen's d for paired
+samples. The module also provides a percentile bootstrap confidence interval,
+a two-sample randomization test for difference-of-differences contrasts, and
+the Holm-Bonferroni correction for a family of tests.
 
 Pure Python plus optional scipy. The randomization test never needs scipy.
 The t-test prefers scipy.stats but falls back to a normal approximation.
@@ -13,12 +15,15 @@ from __future__ import annotations
 import math
 import random
 
+VALID_ALTERNATIVES = ("two-sided", "greater", "less")
+
 
 # ----------------------------------------------------------------------
 # Defaults
 # ----------------------------------------------------------------------
 
 DEFAULT_RANDOMIZATION_B = 10000
+DEFAULT_BOOTSTRAP_RESAMPLES = 1000
 DEFAULT_SEED = 42
 
 
@@ -30,24 +35,28 @@ def paired_randomization(
     a: list[float],
     b: list[float],
     *,
+    alternative: str = "two-sided",
     B: int = DEFAULT_RANDOMIZATION_B,
     seed: int = DEFAULT_SEED,
 ) -> dict:
-    """Two-sided paired randomization test for the mean of differences.
+    """Paired randomization test for the mean of differences.
 
     For each query i compute d_i = a_i - b_i. Null hypothesis, the sign of
     d_i is exchangeable, equivalent to "system labels are interchangeable".
-    Resample sign assignments B times, recompute the mean each time, count
-    how often the absolute permuted mean is at least as extreme as the
-    observed absolute mean.
+    Resample sign assignments B times and recompute the mean each time. For a
+    two-sided test count how often the absolute permuted mean is at least as
+    extreme as the observed absolute mean. For "greater" count permuted means
+    at least the observed, for "less" count those at most the observed.
     """
+    if alternative not in VALID_ALTERNATIVES:
+        raise ValueError(f"alternative must be one of {VALID_ALTERNATIVES}, got {alternative!r}")
     if len(a) != len(b):
         raise ValueError(f"paired arrays must be same length, got {len(a)} and {len(b)}")
     n = len(a)
     if n < 2:
         return {
             "method": "paired-randomization",
-            "n": n, "B": B, "seed": seed,
+            "n": n, "B": B, "seed": seed, "alternative": alternative,
             "mean_diff": 0.0, "p_value": 1.0,
             "note": "n < 2, test undefined",
         }
@@ -63,7 +72,14 @@ def paired_randomization(
         for d in diffs:
             sign = 1.0 if rng.random() < 0.5 else -1.0
             permuted_sum += sign * d
-        if abs(permuted_sum / n) >= abs_observed:
+        permuted = permuted_sum / n
+        if alternative == "two-sided":
+            hit = abs(permuted) >= abs_observed
+        elif alternative == "greater":
+            hit = permuted >= observed
+        else:
+            hit = permuted <= observed
+        if hit:
             extreme_count += 1
 
     # Add-one smoothed p-value, never zero.
@@ -73,6 +89,7 @@ def paired_randomization(
         "n": n,
         "B": B,
         "seed": seed,
+        "alternative": alternative,
         "mean_diff": observed,
         "p_value": p_value,
     }
@@ -82,8 +99,10 @@ def paired_randomization(
 # Paired t-test (secondary test)
 # ----------------------------------------------------------------------
 
-def paired_t_test(a: list[float], b: list[float]) -> dict:
-    """Two-sided paired t-test on the mean of differences."""
+def paired_t_test(a: list[float], b: list[float], *, alternative: str = "two-sided") -> dict:
+    """Paired t-test on the mean of differences, two-sided by default."""
+    if alternative not in VALID_ALTERNATIVES:
+        raise ValueError(f"alternative must be one of {VALID_ALTERNATIVES}, got {alternative!r}")
     if len(a) != len(b):
         raise ValueError(f"paired arrays must be same length, got {len(a)} and {len(b)}")
     n = len(a)
@@ -91,7 +110,7 @@ def paired_t_test(a: list[float], b: list[float]) -> dict:
         return {
             "method": "paired-t-test",
             "n": n, "p_value": 1.0, "t_stat": 0.0, "df": 0,
-            "mean_diff": 0.0, "std_err": 0.0,
+            "mean_diff": 0.0, "std_err": 0.0, "alternative": alternative,
             "note": "n < 2, test undefined",
         }
 
@@ -104,13 +123,19 @@ def paired_t_test(a: list[float], b: list[float]) -> dict:
             "method": "paired-t-test",
             "n": n, "df": df,
             "t_stat": 0.0, "mean_diff": mean_d, "std_err": 0.0,
-            "p_value": 1.0,
+            "p_value": 1.0, "alternative": alternative,
             "note": "zero variance, all differences identical",
         }
 
     se = math.sqrt(var_d / n)
     t_stat = mean_d / se
-    p_value = _two_sided_p_t(t_stat, df)
+    p_two = _two_sided_p_t(t_stat, df)
+    if alternative == "two-sided":
+        p_value = p_two
+    elif alternative == "greater":
+        p_value = p_two / 2.0 if t_stat > 0 else 1.0 - p_two / 2.0
+    else:
+        p_value = p_two / 2.0 if t_stat < 0 else 1.0 - p_two / 2.0
     return {
         "method": "paired-t-test",
         "n": n,
@@ -118,6 +143,7 @@ def paired_t_test(a: list[float], b: list[float]) -> dict:
         "t_stat": t_stat,
         "mean_diff": mean_d,
         "std_err": se,
+        "alternative": alternative,
         "p_value": p_value,
     }
 
@@ -177,6 +203,156 @@ def sawilowsky_label(d: float) -> str:
 
 
 # ----------------------------------------------------------------------
+# Percentile bootstrap confidence interval
+# ----------------------------------------------------------------------
+
+def bootstrap_ci_paired(
+    a: list[float],
+    b: list[float],
+    *,
+    resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    confidence: float = 0.95,
+    seed: int = DEFAULT_SEED,
+) -> dict:
+    """Percentile bootstrap CI on the mean paired difference a - b.
+
+    Resamples the paired differences with replacement, which keeps the
+    pairing intact, and takes the empirical percentiles of the resampled
+    means.
+    """
+    if len(a) != len(b):
+        raise ValueError(f"paired arrays must be same length, got {len(a)} and {len(b)}")
+    n = len(a)
+    diffs = [float(ai) - float(bi) for ai, bi in zip(a, b)]
+    if n < 2:
+        point = diffs[0] if diffs else 0.0
+        return {"low": point, "high": point, "confidence": confidence, "n": n}
+
+    rng = random.Random(seed)
+    means = []
+    for _ in range(resamples):
+        total = 0.0
+        for _ in range(n):
+            total += diffs[rng.randrange(n)]
+        means.append(total / n)
+    means.sort()
+    tail = (1.0 - confidence) / 2.0
+    low = means[int(tail * resamples)]
+    high = means[min(int((1.0 - tail) * resamples), resamples - 1)]
+    return {"low": low, "high": high, "confidence": confidence, "n": n}
+
+
+# ----------------------------------------------------------------------
+# Two-sample randomization for a difference-of-differences contrast
+# ----------------------------------------------------------------------
+
+def two_sample_randomization(
+    values: list[float],
+    n_subset: int,
+    *,
+    alternative: str = "greater",
+    B: int = DEFAULT_RANDOMIZATION_B,
+    seed: int = DEFAULT_SEED,
+) -> dict:
+    """Test whether a subset mean exceeds the complement mean.
+
+    The input is one per-query value for every query, with the first
+    n_subset entries forming the subset of interest. The statistic is the
+    subset mean minus the complement mean. The null shuffles the subset label
+    across queries. Used for the multihop difference-of-differences contrast,
+    where each value is a per-query paradigm margin.
+    """
+    if alternative not in VALID_ALTERNATIVES:
+        raise ValueError(f"alternative must be one of {VALID_ALTERNATIVES}, got {alternative!r}")
+    n = len(values)
+    if not 0 < n_subset < n:
+        raise ValueError(f"n_subset must be between 1 and {n - 1}, got {n_subset}")
+
+    def contrast(order: list[float]) -> float:
+        sub = sum(order[:n_subset]) / n_subset
+        comp = sum(order[n_subset:]) / (n - n_subset)
+        return sub - comp
+
+    observed = contrast(values)
+    rng = random.Random(seed)
+    extreme_count = 0
+    for _ in range(B):
+        picked = rng.sample(range(n), n_subset)
+        picked_set = set(picked)
+        sub = sum(values[i] for i in picked) / n_subset
+        comp = sum(values[i] for i in range(n) if i not in picked_set) / (n - n_subset)
+        stat = sub - comp
+        if alternative == "two-sided":
+            hit = abs(stat) >= abs(observed)
+        elif alternative == "greater":
+            hit = stat >= observed
+        else:
+            hit = stat <= observed
+        if hit:
+            extreme_count += 1
+
+    return {
+        "method": "two-sample-randomization",
+        "n": n,
+        "n_subset": n_subset,
+        "B": B,
+        "seed": seed,
+        "alternative": alternative,
+        "contrast": observed,
+        "p_value": (extreme_count + 1) / (B + 1),
+    }
+
+
+def two_sample_bootstrap_ci(
+    subset: list[float],
+    complement: list[float],
+    *,
+    resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    confidence: float = 0.95,
+    seed: int = DEFAULT_SEED,
+) -> dict:
+    """Percentile bootstrap CI on the subset-minus-complement contrast.
+
+    Resamples within each group independently, matching the structure of the
+    two-sample randomization test.
+    """
+    rng = random.Random(seed)
+    ns, nc = len(subset), len(complement)
+    contrasts = []
+    for _ in range(resamples):
+        sub = sum(subset[rng.randrange(ns)] for _ in range(ns)) / ns
+        comp = sum(complement[rng.randrange(nc)] for _ in range(nc)) / nc
+        contrasts.append(sub - comp)
+    contrasts.sort()
+    tail = (1.0 - confidence) / 2.0
+    low = contrasts[int(tail * resamples)]
+    high = contrasts[min(int((1.0 - tail) * resamples), resamples - 1)]
+    return {"low": low, "high": high, "confidence": confidence}
+
+
+# ----------------------------------------------------------------------
+# Multiple-comparison correction
+# ----------------------------------------------------------------------
+
+def holm_bonferroni(pvalues: dict[str, float], *, alpha: float = 0.05) -> dict[str, dict]:
+    """Holm-Bonferroni step-down adjustment for a family of p-values.
+
+    Returns, per key, the adjusted p-value and whether it rejects the null at
+    the family-wise level alpha. Adjusted values are monotone in rank, as the
+    step-down procedure requires.
+    """
+    items = sorted(pvalues.items(), key=lambda kv: kv[1])
+    m = len(items)
+    out: dict[str, dict] = {}
+    running = 0.0
+    for i, (name, p) in enumerate(items):
+        adjusted = min((m - i) * p, 1.0)
+        running = max(running, adjusted)
+        out[name] = {"p_raw": p, "p_adjusted": running, "reject": running < alpha}
+    return out
+
+
+# ----------------------------------------------------------------------
 # Convenience, run the whole headline suite at once
 # ----------------------------------------------------------------------
 
@@ -184,16 +360,20 @@ def compare_paired(
     a: list[float],
     b: list[float],
     *,
+    alternative: str = "two-sided",
     B: int = DEFAULT_RANDOMIZATION_B,
+    bootstrap_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
     seed: int = DEFAULT_SEED,
 ) -> dict:
-    """Bundle paired randomization, paired t-test, and Cohen's d into one dict.
+    """Bundle randomization, t-test, Cohen's d, and a bootstrap CI into one dict.
 
-    Use this as the headline output for one (system_a, system_b, metric).
+    Use this as the headline output for one (system_a, system_b, metric). The
+    alternative applies to both the randomization test and the t-test.
     """
-    rand = paired_randomization(a, b, B=B, seed=seed)
-    t = paired_t_test(a, b)
+    rand = paired_randomization(a, b, alternative=alternative, B=B, seed=seed)
+    t = paired_t_test(a, b, alternative=alternative)
     eff = cohens_d_paired(a, b)
+    ci = bootstrap_ci_paired(a, b, resamples=bootstrap_resamples, seed=seed)
     convergent = (
         rand.get("p_value", 1.0) < 0.05
     ) == (
@@ -202,9 +382,11 @@ def compare_paired(
     return {
         "n": rand.get("n", len(a)),
         "mean_diff": rand.get("mean_diff", 0.0),
+        "alternative": alternative,
         "paired_randomization": rand,
         "paired_t_test": t,
         "cohens_d": eff,
+        "bootstrap_ci": ci,
         "tests_converge": convergent,
     }
 

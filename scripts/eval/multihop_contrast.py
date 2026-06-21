@@ -25,7 +25,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import random
 import sys
 from pathlib import Path
 
@@ -36,15 +35,17 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.eval.core import io as eval_io  # noqa: E402
 from scripts.eval.core.significance import (  # noqa: E402
+    DEFAULT_BOOTSTRAP_RESAMPLES,
     DEFAULT_RANDOMIZATION_B,
     DEFAULT_SEED,
+    two_sample_bootstrap_ci,
+    two_sample_randomization,
 )
 
 
 DEFAULT_RUN_A = "data/eval_runs/stage3_test/rq4_test_hybrid_tree"
 DEFAULT_RUN_B = "data/eval_runs/stage3_test/rq4_test_v2m3_qe"
 DEFAULT_METRIC = "recall@2"
-DEFAULT_BOOTSTRAP_RESAMPLES = 1000
 
 
 def load_run_records(run_dir: Path) -> dict[str, dict]:
@@ -134,38 +135,24 @@ def main() -> int:
           f"complement {complement_margin:.4f}, overall {mean(list(diffs.values())):.4f}")
     print(f"Observed contrast (subset minus complement): {observed:.4f}")
 
-    # Permutation test on the subset label, p-values per Phipson and Smyth.
-    rng = random.Random(args.seed)
-    values = [diffs[q] for q in qids]
-    n_subset = len(subset)
-    at_least_two_sided = 0
-    at_least_one_sided = 0
-    for _ in range(args.permutations):
-        picked = set(rng.sample(range(len(values)), n_subset))
-        sub = [values[i] for i in picked]
-        comp = [values[i] for i in range(len(values)) if i not in picked]
-        stat = mean(sub) - mean(comp)
-        if abs(stat) >= abs(observed):
-            at_least_two_sided += 1
-        if stat >= observed:
-            at_least_one_sided += 1
-    p_two = (at_least_two_sided + 1) / (args.permutations + 1)
-    p_one = (at_least_one_sided + 1) / (args.permutations + 1)
+    # Permutation test on the subset label, via the shared core engine. The
+    # ordered values place the subset first so the observed contrast matches.
+    subset_diffs = [diffs[q] for q in subset]
+    complement_diffs = [diffs[q] for q in complement]
+    ordered = subset_diffs + complement_diffs
+    p_two = two_sample_randomization(
+        ordered, len(subset), alternative="two-sided",
+        B=args.permutations, seed=args.seed)["p_value"]
+    p_one = two_sample_randomization(
+        ordered, len(subset), alternative="greater",
+        B=args.permutations, seed=args.seed)["p_value"]
     print(f"Permutation test ({args.permutations} permutations, seed {args.seed}): "
           f"p two-sided {p_two:.4f}, one-sided {p_one:.4f}")
 
-    # Percentile bootstrap on the contrast, resampling within each group.
-    subset_diffs = [diffs[q] for q in subset]
-    complement_diffs = [diffs[q] for q in complement]
-    boots = []
-    for _ in range(args.bootstrap_resamples):
-        sub = [subset_diffs[rng.randrange(len(subset_diffs))] for _ in range(len(subset_diffs))]
-        comp = [complement_diffs[rng.randrange(len(complement_diffs))]
-                for _ in range(len(complement_diffs))]
-        boots.append(mean(sub) - mean(comp))
-    boots.sort()
-    lo = boots[int(0.025 * len(boots))]
-    hi = boots[int(0.975 * len(boots)) - 1]
+    ci = two_sample_bootstrap_ci(
+        subset_diffs, complement_diffs,
+        resamples=args.bootstrap_resamples, seed=args.seed)
+    lo, hi = ci["low"], ci["high"]
     print(f"Bootstrap 95 percent CI of the contrast "
           f"({args.bootstrap_resamples} resamples): [{lo:.4f}, {hi:.4f}]")
 
