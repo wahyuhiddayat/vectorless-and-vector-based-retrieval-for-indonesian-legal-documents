@@ -9,6 +9,7 @@ tmp_gt_*.txt
 CLAUDE.md
 AGENTS.md
 CHANGELOG.md
+.venv/
 __pycache__/
 *.pyc
 *.pyo
