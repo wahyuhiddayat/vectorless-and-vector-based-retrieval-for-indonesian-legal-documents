@@ -1,0 +1,68 @@
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usetikzlibrary{arrows.meta, backgrounds}
+
+\definecolor{phasefill}{HTML}{F4F7FB}
+\definecolor{phaseborder}{HTML}{9AA7B4}
+\definecolor{datafill}{HTML}{FFF4D6}
+\definecolor{databorder}{HTML}{D9A441}
+\definecolor{scorefill}{HTML}{E9F7F2}
+\definecolor{scoreborder}{HTML}{1BA99C}
+\definecolor{outfill}{HTML}{E7F6E7}
+\definecolor{outborder}{HTML}{4FA64F}
+\definecolor{darkline}{HTML}{333333}
+
+\tikzset{
+  panel/.style={rectangle, rounded corners=10pt, fill=phasefill, draw=phaseborder, line width=1pt},
+  box/.style={rectangle, rounded corners=5pt, align=center, draw=darkline, line width=0.8pt, minimum height=0.9cm, font=\small},
+  input/.style={box, fill=white, minimum width=2.3cm},
+  data/.style={box, fill=datafill, draw=databorder, minimum width=3.2cm},
+  score/.style={box, fill=scorefill, draw=scoreborder, minimum width=3.0cm, font=\small\bfseries},
+  output/.style={box, fill=outfill, draw=outborder, minimum width=3.0cm},
+  context/.style={box, fill=white, minimum width=3.4cm},
+  flow/.style={-{Latex[length=2.2mm]}, line width=0.85pt, draw=darkline},
+  phase-title/.style={font=\small\bfseries, align=center}
+}
+
+\begin{document}
+\begin{tikzpicture}
+
+\begin{pgfonlayer}{background}
+  \node[panel, minimum width=4.8cm, minimum height=6.4cm] at (4.4, 3.55) {};
+  \node[panel, minimum width=5.3cm, minimum height=6.4cm] at (10.45, 3.55) {};
+  \node[panel, minimum width=4.5cm, minimum height=6.4cm] at (16.5, 3.55) {};
+\end{pgfonlayer}
+
+\node[input] (query) at (0.0, 5.35) {Legal query};
+\node[data, minimum width=2.55cm] (corpus) at (0.0, 3.25) {Hierarchical\\legal corpus};
+
+\node[phase-title] at (4.4, 6.35) {Step 1. Document selection};
+\node[data] (catalog) at (4.4, 5.2) {Document catalog\\metadata + summaries};
+\node[score] (docbm25) at (4.4, 3.95) {BM25 document scorer};
+\node[output] (docs) at (4.4, 2.7) {Candidate laws};
+
+\node[phase-title] at (10.45, 6.35) {Step 2. Tree beam search};
+\node[context] (levels) at (10.45, 5.15) {Tree levels\\titles + summaries};
+\node[score] (levelbm25) at (10.45, 3.95) {BM25 node scorer};
+\node[context] (pool) at (10.45, 2.75) {Reached leaf pool};
+\node[score] (leafbm25) at (10.45, 1.55) {Full-text BM25 rerank};
+
+\node[phase-title] at (16.5, 6.35) {Step 3. Retrieval output};
+\node[output, minimum width=3.4cm] (sources) at (16.5, 4.45) {Ranked legal sources\\node, title, path, score};
+\node[data, minimum width=3.0cm] (record) at (16.5, 2.85) {Retrieval record};
+
+\draw[flow] (query.east) -- (docbm25.west);
+\draw[flow] (corpus.east) -- (catalog.west);
+\draw[flow] (catalog) -- (docbm25);
+\draw[flow] (docbm25) -- (docs);
+\draw[flow] (docs.east) -- (levels.west);
+\draw[flow] (levels) -- (levelbm25);
+\draw[flow] (levelbm25) -- (pool);
+\draw[flow] (pool) -- (leafbm25);
+\draw[flow] (leafbm25.east) -- (sources.west);
+\draw[flow] (sources) -- (record);
+
+\end{tikzpicture}
+\end{document}

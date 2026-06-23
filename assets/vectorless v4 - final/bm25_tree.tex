@@ -1,0 +1,114 @@
+\documentclass[tikz,border=14pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath}
+\usetikzlibrary{arrows.meta, fit, backgrounds, positioning, calc}
+
+\definecolor{queryfill}{HTML}{DFF7F3}
+\definecolor{queryborder}{HTML}{1BA99C}
+\definecolor{corpusfill}{HTML}{FFF4D6}
+\definecolor{corpusborder}{HTML}{D9A441}
+\definecolor{bm25fill}{HTML}{FFE9C8}
+\definecolor{bm25border}{HTML}{D88922}
+\definecolor{outfill}{HTML}{E7F6E7}
+\definecolor{outborder}{HTML}{4FA64F}
+\definecolor{poolfill}{HTML}{F1F9F1}
+\definecolor{regfill}{HTML}{F6F8FB}
+\definecolor{regborder}{HTML}{C4CDD6}
+\definecolor{darkline}{HTML}{333333}
+\definecolor{subtext}{HTML}{5A4632}
+
+\tikzset{
+  card/.style={rectangle, rounded corners=5pt, align=center, draw=darkline,
+               line width=0.8pt, minimum height=1.2cm, font=\small},
+  query/.style={card, fill=queryfill, draw=queryborder, minimum width=2.2cm},
+  proc/.style={card, fill=bm25fill, draw=bm25border, minimum width=3.6cm,
+               minimum height=1.5cm},
+  result/.style={card, fill=outfill, draw=outborder, minimum width=2.6cm,
+                 minimum height=1.5cm},
+  docbox/.style={rectangle, rounded corners=4pt, align=center,
+                 draw=corpusborder, fill=corpusfill, line width=0.8pt,
+                 minimum width=1.8cm, minimum height=1.1cm, font=\small},
+  tnode/.style={rectangle, rounded corners=4pt, draw=bm25border, fill=bm25fill,
+                line width=0.8pt, minimum width=2.0cm, minimum height=0.8cm, font=\scriptsize},
+  leaf/.style={rectangle, rounded corners=3pt, draw=outborder, fill=outfill,
+               line width=0.8pt, minimum width=1.15cm, minimum height=0.95cm},
+  region/.style={rounded corners=12pt, fill=regfill, draw=regborder, line width=0.8pt},
+  pooldash/.style={draw=outborder, dashed, rounded corners=8pt, fill=poolfill,
+                   line width=0.85pt},
+  regtitle/.style={font=\small\bfseries, text=darkline},
+  note/.style={font=\scriptsize\itshape, text=subtext, align=center},
+  sub/.style={font=\scriptsize, text=subtext},
+  flow/.style={-{Latex[length=2.5mm]}, line width=0.95pt, draw=darkline},
+  branch/.style={-{Latex[length=2.0mm]}, line width=0.75pt, draw=darkline},
+}
+
+%% Horizontal axis, spine y = 8.15.
+%  query 1.2 | docsel 5.7 | doc 10.6 | tnode 13.9 | leaf 17.7
+%  merge 22.6 | rerank 27.5 | sources 31.9
+%  Region A vertical span tall (leaves). Titles get extra headroom.
+
+\begin{document}
+\begin{tikzpicture}
+
+\node[query] (query) at (1.20, 8.15) {Query $q$};
+
+\node[proc] (docsel) at (5.70, 8.15)
+  {Document Retrieval\\[2pt]{\scriptsize\textcolor{subtext}{BM25 (Metadata \& Summaries)}}\\[-1pt]{\scriptsize\textcolor{subtext}{Select Top-$K_{\text{doc}}$ Documents}}};
+
+\begin{scope}[on background layer]
+  \node[docbox, draw=corpusborder, fill=white, opacity=0.45] at (10.87, 8.32) {};
+  \node[docbox, draw=corpusborder, fill=white, opacity=0.70] at (10.74, 8.23) {};
+\end{scope}
+\node[docbox] (doc) at (10.60, 8.15) {Document $D_i$};
+\node[note] (docnote) at (10.60, 6.45) {For each retrieved\\document $D_i$};
+
+\node[tnode] (n1) at (13.90, 10.25) {Internal Node};
+\node[tnode] (n2) at (13.90, 6.05) {Internal Node};
+\node[note] (nnote) at (13.90, 4.85) {Scored via BM25\\(Title \& Summary)};
+
+\node[pooldash, fit={(17.15,4.55) (18.25,11.75)}] (pool) {};
+\node[leaf, align=center, font=\scriptsize] (l1) at (17.70, 11.30) {$l_1$};
+\node[leaf, align=center, font=\scriptsize] (l2) at (17.70,  9.20) {$l_2$};
+\node[leaf, align=center, font=\scriptsize] (l3) at (17.70,  7.10) {$l_3$};
+\node[leaf, align=center, font=\scriptsize] (l4) at (17.70,  5.00) {$l_4$};
+\node[note] (poolnote) at (17.70, 3.40) {Candidate Leaf Pool\\(Accumulated from all $D_i$)};
+
+%% ── Re-ranking block (same horizontal axis) ────────────────────────────────
+\node[proc]   (merge)  at (22.70, 8.15)
+  {Candidate Merger\\[2pt]{\scriptsize\textcolor{subtext}{Deduplicate by (Document, Node)}}};
+\node[proc]   (rerank) at (27.60, 8.15)
+  {Global Re-ranking\\[2pt]{\scriptsize\textcolor{subtext}{Full-Text BM25, Top-$K$}}};
+\node[result] (sources) at (32.00, 8.15) {Final Ranked\\Sources};
+
+%% ── Regions: extra top inner sep so titles never touch nodes ────────────────
+\begin{scope}[on background layer]
+  \node[region, fit=(n1)(n2)(nnote)(pool)(poolnote),
+        inner xsep=20pt, inner ysep=20pt] (regA) {};
+  \node[region, fit=(merge)(rerank)(sources),
+        inner xsep=22pt, inner ysep=20pt] (regB) {};
+\end{scope}
+%% Titles placed ABOVE the region top edge, not inside near a node.
+\node[regtitle, anchor=south] at ($(regA.north)+(0,0.18)$) {Stage 2: Tree-Structured Beam Search};
+\node[regtitle, anchor=south] at ($(regB.north)+(0,0.18)$) {Stage 3: Global Re-ranking};
+\node[regtitle, anchor=south] at (5.70, 9.78) {Stage 1: Document Retrieval};
+
+%% ── Flow: all straight ──────────────────────────────────────────────────────
+\draw[flow]   (query)  -- (docsel);
+\draw[flow]   (docsel) -- (doc);
+
+\draw[branch] (doc.east) -- (n1.west);
+\draw[branch] (doc.east) -- (n2.west);
+
+\draw[branch] (n1.east) -- (l1.west);
+\draw[branch] (n1.east) -- (l2.west);
+\draw[branch] (n2.east) -- (l3.west);
+\draw[branch] (n2.east) -- (l4.west);
+
+\draw[flow] (pool.east) -- (merge.west);
+\draw[flow] (merge)  -- (rerank);
+\draw[flow] (rerank) -- (sources);
+
+\end{tikzpicture}
+\end{document}

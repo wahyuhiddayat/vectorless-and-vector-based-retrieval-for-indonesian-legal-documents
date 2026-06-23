@@ -1,0 +1,66 @@
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usetikzlibrary{arrows.meta, backgrounds}
+
+\definecolor{phasefill}{HTML}{F4F7FB}
+\definecolor{phaseborder}{HTML}{9AA7B4}
+\definecolor{datafill}{HTML}{FFF4D6}
+\definecolor{databorder}{HTML}{D9A441}
+\definecolor{scorefill}{HTML}{E9F7F2}
+\definecolor{scoreborder}{HTML}{1BA99C}
+\definecolor{outfill}{HTML}{E7F6E7}
+\definecolor{outborder}{HTML}{4FA64F}
+\definecolor{darkline}{HTML}{333333}
+
+\tikzset{
+  panel/.style={rectangle, rounded corners=10pt, fill=phasefill, draw=phaseborder, line width=1pt},
+  box/.style={rectangle, rounded corners=5pt, align=center, draw=darkline, line width=0.8pt, minimum height=0.9cm, font=\small},
+  input/.style={box, fill=white, minimum width=2.3cm},
+  data/.style={box, fill=datafill, draw=databorder, minimum width=3.2cm},
+  score/.style={box, fill=scorefill, draw=scoreborder, minimum width=3.0cm, font=\small\bfseries},
+  output/.style={box, fill=outfill, draw=outborder, minimum width=3.0cm},
+  context/.style={box, fill=white, minimum width=3.4cm},
+  flow/.style={-{Latex[length=2.2mm]}, line width=0.85pt, draw=darkline},
+  phase-title/.style={font=\small\bfseries, align=center}
+}
+
+\begin{document}
+\begin{tikzpicture}
+
+\begin{pgfonlayer}{background}
+  \node[panel, minimum width=4.8cm, minimum height=5.8cm] at (4.4, 3.45) {};
+  \node[panel, minimum width=4.8cm, minimum height=5.8cm] at (10.2, 3.45) {};
+  \node[panel, minimum width=4.5cm, minimum height=5.8cm] at (15.8, 3.45) {};
+\end{pgfonlayer}
+
+\node[input] (query) at (0.0, 5.15) {Legal query};
+\node[data, minimum width=2.55cm] (corpus) at (0.0, 3.35) {Hierarchical\\legal corpus};
+
+\node[phase-title] at (4.4, 5.95) {Step 1. Flatten corpus};
+\node[data] (leaves) at (4.4, 4.85) {All legal leaf nodes\\across documents};
+\node[data] (enriched) at (4.4, 3.45) {Enriched text\\title, path, article text};
+\node[context] (tokens) at (4.4, 2.05) {Tokenized corpus\\and tokenized query};
+
+\node[phase-title] at (10.2, 5.95) {Step 2. Keyword scoring};
+\node[score] (bm25) at (10.2, 4.55) {BM25 scorer};
+\node[context] (ranked) at (10.2, 3.15) {Ranked leaf nodes\\by lexical match};
+\node[output] (topnodes) at (10.2, 1.75) {Top candidates};
+
+\node[phase-title] at (15.8, 5.95) {Step 3. Retrieval output};
+\node[output, minimum width=3.4cm] (sources) at (15.8, 4.4) {Ranked legal sources\\node, title, path, score};
+\node[data, minimum width=3.0cm] (record) at (15.8, 2.8) {Retrieval record};
+
+\draw[flow] (query.east) -- (tokens.west);
+\draw[flow] (corpus.east) -- (leaves.west);
+\draw[flow] (leaves) -- (enriched);
+\draw[flow] (enriched) -- (tokens);
+\draw[flow] (tokens.east) -- (bm25.west);
+\draw[flow] (bm25) -- (ranked);
+\draw[flow] (ranked) -- (topnodes);
+\draw[flow] (topnodes.east) -- (sources.west);
+\draw[flow] (sources) -- (record);
+
+\end{tikzpicture}
+\end{document}
