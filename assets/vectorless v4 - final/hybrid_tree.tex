@@ -67,7 +67,7 @@
 
 % Stage 2: per-document BM25 leaf candidates, pooled cross-document
 \node[proc] (bm25leaf) at (10.9, 0)   {BM25 leaf\\search};
-\node[db]   (trees)    at (10.9,-3.0) {Document\\trees};
+\node[db]   (trees)    at (10.9,-2.35) {Document\\trees};
 \node[leaf, right=1.5cm of bm25leaf, yshift=\cspread]  (c1) {$c_1$};
 \node[leaf, right=1.5cm of bm25leaf]                   (c2) {$c_2$};
 \node[leaf, right=1.5cm of bm25leaf, yshift=-\cspread] (ck) {$c_K$};
@@ -92,7 +92,7 @@
 \begin{scope}[on background layer]
   \coordinate (bandB) at ($(trees.south)+(0,-0.14)$);
   \node[region, inner xsep=12pt, inner ysep=6pt,
-        fit=(bm25doc)(llmdoc)(llmdocnote)(catalog)(merge)(mergenote)] (reg1) {};
+        fit=(bm25doc)(llmdoc)(llmdocnote)(catalog)(merge)(mergenote)(merge|-bandB)] (reg1) {};
   \node[region, inner xsep=12pt, inner ysep=6pt,
         fit=(bm25leaf)(leafnote)(trees)(cpool)(candnote)(bm25leaf|-bandB)] (reg2) {};
   \node[region, inner xsep=12pt, inner ysep=6pt,
