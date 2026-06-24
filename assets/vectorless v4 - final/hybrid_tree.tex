@@ -92,7 +92,7 @@
 \begin{scope}[on background layer]
   \coordinate (bandB) at ($(trees.south)+(0,-0.14)$);
   \node[region, inner xsep=12pt, inner ysep=6pt,
-        fit=(bm25doc)(llmdoc)(llmdocnote)(catalog)(merge)(mergenote)(merge|-bandB)] (reg1) {};
+        fit=(bm25doc)(llmdoc)(llmdocnote)(catalog)(merge)(mergenote)] (reg1) {};
   \node[region, inner xsep=12pt, inner ysep=6pt,
         fit=(bm25leaf)(leafnote)(trees)(cpool)(candnote)(bm25leaf|-bandB)] (reg2) {};
   \node[region, inner xsep=12pt, inner ysep=6pt,
