@@ -2,9 +2,10 @@
 
 Paired randomization is the primary test, with no normality assumption.
 The paired t-test is the secondary. Effect size is Cohen's d for paired
-samples. The module also provides a percentile bootstrap confidence interval,
-a two-sample randomization test for difference-of-differences contrasts, and
-the Holm-Bonferroni correction for a family of tests.
+samples and Cliff's delta for two independent samples. The module also provides
+a percentile bootstrap confidence interval, a two-sample randomization test for
+difference-of-differences contrasts, and the Holm-Bonferroni correction for a
+family of tests.
 
 Pure Python plus optional scipy. The randomization test never needs scipy.
 The t-test prefers scipy.stats but falls back to a normal approximation.
@@ -200,6 +201,45 @@ def sawilowsky_label(d: float) -> str:
     if abs_d < 2.0:
         return "very large"
     return "huge"
+
+
+# ----------------------------------------------------------------------
+# Effect size, Cliff's delta for two independent samples
+# ----------------------------------------------------------------------
+
+def cliffs_delta(a: list[float], b: list[float]) -> dict:
+    """Cliff's delta, a nonparametric effect size for two independent samples.
+
+    Delta is the probability that a random value from a exceeds one from b minus
+    the reverse, in the range -1 to 1. It is robust to the bounded, skewed shape
+    of per-query retrieval metrics, where Cohen's d is distorted. Used for the
+    H8 interaction, the subset margins against the complement margins. Magnitude
+    thresholds follow Romano et al. 2006.
+    """
+    na, nb = len(a), len(b)
+    if na == 0 or nb == 0:
+        return {"delta": 0.0, "label": "n/a", "n_a": na, "n_b": nb}
+    greater = less = 0
+    for x in a:
+        for y in b:
+            if x > y:
+                greater += 1
+            elif x < y:
+                less += 1
+    delta = (greater - less) / (na * nb)
+    return {"delta": delta, "label": cliffs_label(delta), "n_a": na, "n_b": nb}
+
+
+def cliffs_label(delta: float) -> str:
+    """Magnitude label for Cliff's delta, Romano et al. 2006 thresholds."""
+    abs_d = abs(delta)
+    if abs_d < 0.147:
+        return "negligible"
+    if abs_d < 0.33:
+        return "small"
+    if abs_d < 0.474:
+        return "medium"
+    return "large"
 
 
 # ----------------------------------------------------------------------
@@ -443,3 +483,13 @@ def run_self_test() -> None:
         raise AssertionError("sawilowsky_label(1.5) wrong")
     if sawilowsky_label(-2.5) != "huge":
         raise AssertionError("sawilowsky_label should use abs value")
+
+    # Cliff's delta, full separation is +/-1, identical groups is 0
+    if cliffs_delta([1.0, 1.0, 1.0], [0.0, 0.0])["delta"] != 1.0:
+        raise AssertionError("cliffs_delta full separation should be 1.0")
+    if cliffs_delta([0.0, 0.0], [1.0, 1.0, 1.0])["delta"] != -1.0:
+        raise AssertionError("cliffs_delta reversed separation should be -1.0")
+    if cliffs_delta([1.0, 0.0], [1.0, 0.0])["delta"] != 0.0:
+        raise AssertionError("cliffs_delta identical groups should be 0.0")
+    if cliffs_label(0.10) != "negligible" or cliffs_label(0.40) != "medium":
+        raise AssertionError("cliffs_label thresholds wrong")
