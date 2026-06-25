@@ -52,11 +52,11 @@ METRIC = "map@10"
 
 # Held-out runs keyed by the short labels used in the analysis plan.
 HELD_OUT = {
-    "A": "test_bm25/records/bm25-flat__pasal.jsonl",
-    "B": "test_hybrid_tree_default/records/hybrid-tree__pasal.jsonl",
-    "C": "test_bgem3/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl",
-    "D": "test_bgem3/records/vector-dense__pasal__bge-m3__none.jsonl",
-    "E": "test_nusabert/records/vector-dense__pasal__all-nusabert-large-v4__bge-reranker-v2-m3.jsonl",
+    "A": "stage3_test/test_bm25/records/bm25-flat__pasal.jsonl",
+    "B": "stage3_test/test_hybrid_tree_default/records/hybrid-tree__pasal.jsonl",
+    "C": "stage3_test/test_bgem3/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl",
+    "D": "stage3_test/test_bgem3/records/vector-dense__pasal__bge-m3__none.jsonl",
+    "E": "stage3_test/test_nusabert/records/vector-dense__pasal__all-nusabert-large-v4__bge-reranker-v2-m3.jsonl",
     "F": "stage3_test/rq4_test_hybrid_tree/records/hybrid-tree__pasal.jsonl",
     "G": "stage3_test/rq4_test_v2m3_qe/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl",
 }
