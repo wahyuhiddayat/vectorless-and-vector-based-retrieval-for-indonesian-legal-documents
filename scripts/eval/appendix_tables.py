@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 RUNS = REPO_ROOT / "data" / "eval_runs"
+
+from scripts.eval.core.significance import compare_paired  # noqa: E402
 
 VL_RUNS = {
     "bm25-flat": "stage1_vectorless/run23_20260520_vectorless_dev_357q_bm25_flat",
@@ -86,14 +91,14 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
     Reports the five effectiveness metrics plus per-query LLM calls and tokens.
     The cost columns are configuration-level and vary little across query types.
     """
-    out.append(r"\begin{table}[H]")
+    out.append(r"\begin{table}[t!]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \scriptsize")
     out.append(r"  \caption{Vectorless results on %s queries across all granularities.}" % qt_name.lower())
     out.append(r"  \label{%s}" % label)
-    out.append(r"  \begin{tabular}{@{}ll|ccccc|rr@{}}")
+    out.append(r"  \begin{tabular}{@{}ll|rrrrr|rr@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Granularity} & \textbf{Method} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{LLM calls} & \textbf{LLM tokens} \\")
     out.append(r"    \midrule")
@@ -115,14 +120,14 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
 
 def vec_table(qt: str, qt_name: str, label: str, out) -> None:
     """Append a vector results table for one query type to out."""
-    out.append(r"\begin{table}[H]")
+    out.append(r"\begin{table}[t!]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \scriptsize")
     out.append(r"  \caption{Vector results on %s queries across all granularities.}" % qt_name.lower())
     out.append(r"  \label{%s}" % label)
-    out.append(r"  \begin{tabular}{@{}lll|ccccc@{}}")
+    out.append(r"  \begin{tabular}{@{}lll|rrrrr@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Granularity} & \textbf{Embedding} & \textbf{Reranker} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} \\")
     out.append(r"    \midrule")
@@ -155,14 +160,14 @@ def test_table(out) -> None:
     effectiveness metrics and mean latency. The language-model token cost is
     configuration-level and reported in the cost tables of Chapter 4.
     """
-    out.append(r"\begin{table}[H]")
+    out.append(r"\begin{table}[t!]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \footnotesize")
     out.append(r"  \caption{Test-partition results by query type for the optimized vectorless and vector configurations.}")
     out.append(r"  \label{tab:appendix-test-bytype}")
-    out.append(r"  \begin{tabular}{@{}ll|ccccc|r@{}}")
+    out.append(r"  \begin{tabular}{@{}ll|rrrrr|r@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Query type} & \textbf{Configuration} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{Latency (s)} \\")
     out.append(r"    \midrule")
@@ -183,7 +188,6 @@ def test_table(out) -> None:
 
 VL_TUNE = "stage2_vectorless/tune_vectorless_log.json"
 VEC_TUNE = "stage2_vector/tune_vector_log.json"
-SIG = "stage3_test/significance_test.json"
 INDEXING = REPO_ROOT / "data" / "indexing_cost_summary.json"
 
 
@@ -204,14 +208,14 @@ def last_step(log: list, name: str) -> dict:
 
 def _stage2_table(caption: str, label: str, groups, out) -> None:
     """Append a Stage 2 tuning table. R@2 was not logged during the search."""
-    out.append(r"\begin{table}[H]")
+    out.append(r"\begin{table}[t!]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \footnotesize")
     out.append(r"  \caption{%s}" % caption)
     out.append(r"  \label{%s}" % label)
-    out.append(r"  \begin{tabular}{@{}ll|cccc@{}}")
+    out.append(r"  \begin{tabular}{@{}ll|rrrr@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Step} & \textbf{Value} & \textbf{MAP@10} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} \\")
     out.append(r"    \midrule")
@@ -259,27 +263,41 @@ def stage2_vec_table(out) -> None:
 
 
 def effect_size_table(out) -> None:
-    """Append the test-partition effect-size table, vectorless minus vector."""
-    st = load_json(SIG)
+    """Append the test-partition effect-size table, vectorless minus vector.
+
+    Recomputed directly from the two optimized configurations' per-query records
+    with the two-sided paired procedure of Chapter 3, so the values match the
+    records exactly. Cohen's d_z is the paired effect size, and the final row
+    restricts R@2 to the two-anchor multihop subset.
+    """
+    f = {r["query_id"]: r for r in load(TEST_RUNS[0][1])}
+    g = {r["query_id"]: r for r in load(TEST_RUNS[1][1])}
+    shared = sorted(set(f) & set(g))
     label_map = {"map@10": "MAP@10", "recall@2": "R@2", "recall@10": "R@10", "mrr@10": "MRR@10", "hit@1": "H@1"}
-    out.append(r"\begin{table}[H]")
+    out.append(r"\begin{table}[t!]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \footnotesize")
     out.append(r"  \caption{Effect sizes for the test-partition comparison, vectorless minus vector.}")
     out.append(r"  \label{tab:appendix-effect-size}")
-    out.append(r"  \begin{tabular}{@{}l|cccc@{}}")
+    out.append(r"  \begin{tabular}{@{}l|rrrc@{}}")
     out.append(r"    \toprule")
-    out.append(r"    \textbf{Metric} & \textbf{Difference} & \textbf{p-value} & \textbf{Cohen's d} & \textbf{Magnitude} \\")
+    out.append(r"    \textbf{Metric} & \textbf{Difference} & \textbf{p-value} & \textbf{Cohen's $d_z$} & \textbf{Magnitude} \\")
     out.append(r"    \midrule")
-    for c in st["comparisons"]:
-        name = label_map.get(c["metric"], c["metric"])
-        if c.get("subset"):
-            name += " (multihop)"
-        out.append("    %s & $+%.4f$ & %.4f & %.2f & %s \\\\" % (
-            name, c["mean_diff"], c["paired_randomization"]["p_value"],
-            c["cohens_d"]["d"], c["cohens_d"]["label"].capitalize()))
+    for m in METRICS:
+        a = [float(f[q].get(m) or 0) for q in shared]
+        b = [float(g[q].get(m) or 0) for q in shared]
+        r = compare_paired(a, b, alternative="two-sided", B=10000, seed=42)
+        out.append("    %s & $%+.4f$ & %.4f & %.2f & %s \\\\" % (
+            label_map[m], r["mean_diff"], r["paired_randomization"]["p_value"],
+            r["cohens_d"]["d"], r["cohens_d"]["label"].capitalize()))
+    mh = [q for q in shared if f[q].get("query_type") == "multihop" and (f[q].get("num_relevant") or 0) == 2]
+    a = [float(f[q].get("recall@2") or 0) for q in mh]
+    b = [float(g[q].get("recall@2") or 0) for q in mh]
+    r = compare_paired(a, b, alternative="two-sided", B=10000, seed=42)
+    out.append("    R@2 (multihop) & $%+.4f$ & %.4f & %.2f & %s \\\\" % (
+        r["mean_diff"], r["paired_randomization"]["p_value"], r["cohens_d"]["d"], r["cohens_d"]["label"].capitalize()))
     out.append(r"    \bottomrule")
     out.append(r"  \end{tabular}")
     out.append(r"\end{table}")
@@ -296,7 +314,7 @@ def indexing_table(out) -> None:
     shared = parse + repair
     vl_specific = sum(summ.values())
     total = shared + vl_specific
-    out.append(r"\begin{table}[H]")
+    out.append(r"\begin{table}[t!]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
