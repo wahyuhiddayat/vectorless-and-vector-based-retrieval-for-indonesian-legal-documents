@@ -91,7 +91,7 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
     Reports the five effectiveness metrics plus per-query LLM calls and tokens.
     The cost columns are configuration-level and vary little across query types.
     """
-    out.append(r"\begin{table}[t!]")
+    out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
@@ -120,7 +120,7 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
 
 def vec_table(qt: str, qt_name: str, label: str, out) -> None:
     """Append a vector results table for one query type to out."""
-    out.append(r"\begin{table}[t!]")
+    out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
@@ -160,7 +160,7 @@ def test_table(out) -> None:
     effectiveness metrics and mean latency. The language-model token cost is
     configuration-level and reported in the cost tables of Chapter 4.
     """
-    out.append(r"\begin{table}[t!]")
+    out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
@@ -208,7 +208,7 @@ def last_step(log: list, name: str) -> dict:
 
 def _stage2_table(caption: str, label: str, groups, out) -> None:
     """Append a Stage 2 tuning table. R@2 was not logged during the search."""
-    out.append(r"\begin{table}[t!]")
+    out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
@@ -274,7 +274,7 @@ def effect_size_table(out) -> None:
     g = {r["query_id"]: r for r in load(TEST_RUNS[1][1])}
     shared = sorted(set(f) & set(g))
     label_map = {"map@10": "MAP@10", "recall@2": "R@2", "recall@10": "R@10", "mrr@10": "MRR@10", "hit@1": "H@1"}
-    out.append(r"\begin{table}[t!]")
+    out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
@@ -314,7 +314,7 @@ def indexing_table(out) -> None:
     shared = parse + repair
     vl_specific = sum(summ.values())
     total = shared + vl_specific
-    out.append(r"\begin{table}[t!]")
+    out.append(r"\begin{table}[H]")
     out.append(r"  \centering")
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
