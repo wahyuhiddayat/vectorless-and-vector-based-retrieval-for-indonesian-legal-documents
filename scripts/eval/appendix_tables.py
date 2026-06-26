@@ -156,7 +156,7 @@ TEST_RUNS = [
 def test_table(out) -> None:
     """Append the Stage 3 test-partition results broken down by query type.
 
-    Both optimized configurations are reported per query type with the five
+    Both improved configurations are reported per query type with the five
     effectiveness metrics and mean latency. The language-model token cost is
     configuration-level and reported in the cost tables of Chapter 4.
     """
@@ -165,7 +165,7 @@ def test_table(out) -> None:
     out.append(r"  \setstretch{1.0}")
     out.append(r"  \renewcommand{\arraystretch}{1.15}")
     out.append(r"  \footnotesize")
-    out.append(r"  \caption{Test-partition results by query type for the optimized vectorless and vector configurations.}")
+    out.append(r"  \caption{Test-partition results by query type for the improved vectorless and vector configurations.}")
     out.append(r"  \label{tab:appendix-test-bytype}")
     out.append(r"  \begin{tabular}{@{}ll|rrrrr|r@{}}")
     out.append(r"    \toprule")
@@ -243,7 +243,7 @@ def stage2_vl_table(out) -> None:
         ("Retrieval model", [("deepseek-v4-flash", model["flash"]), ("deepseek-v4-pro", model["v4_pro"])]),
         ("Query expansion", [("original query", qe["without_qe"]), ("expanded query", qe["with_qe"])]),
     ]
-    _stage2_table("Sequential optimization of the best vectorless configuration, full effectiveness metrics.",
+    _stage2_table("Sequential improvement of the best vectorless configuration, full effectiveness metrics.",
                   "tab:appendix-vl-tuning", groups, out)
 
 
@@ -258,14 +258,14 @@ def stage2_vec_table(out) -> None:
         ("Reranker", [("BGE v2 M3", rer["v2_m3_tuned"]), ("BGE v2 Gemma", rer["v2_gemma"])]),
         ("Query expansion", [("original query", qe["without_qe"]), ("expanded query", qe["with_qe"])]),
     ]
-    _stage2_table("Sequential optimization of the best vector configuration, full effectiveness metrics.",
+    _stage2_table("Sequential improvement of the best vector configuration, full effectiveness metrics.",
                   "tab:appendix-vec-tuning", groups, out)
 
 
 def effect_size_table(out) -> None:
     """Append the test-partition effect-size table, vectorless minus vector.
 
-    Recomputed directly from the two optimized configurations' per-query records
+    Recomputed directly from the two improved configurations' per-query records
     with the two-sided paired procedure of Chapter 3, so the values match the
     records exactly. Cohen's d_z is the paired effect size, and the final row
     restricts R@2 to the two-anchor multihop subset.
