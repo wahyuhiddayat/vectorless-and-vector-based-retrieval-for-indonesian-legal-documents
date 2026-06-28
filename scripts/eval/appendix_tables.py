@@ -1,7 +1,7 @@
 """Generate the by-query-type full-results LaTeX tables from the Stage 1 eval records.
 
-For each paradigm and query type, emit a table of MAP@10, R@2, R@10, MRR@10, and
-H@1 across all three granularities, recomputed from the same development-partition
+For each paradigm and query type, emit a table of MAP@10, MRR@10, H@1, R@2, and
+R@10 across all three granularities, recomputed from the same development-partition
 runs used in Chapter 4. Errored queries count as zero, matching the table
 convention. The output file is included by the thesis appendix.
 
@@ -38,7 +38,7 @@ LLM_FLAT_RUNS = {
 VECTOR_RUN = "stage1_vector/run29_20260526_vector_dev_357q_full"
 
 GRANS = ["pasal", "ayat", "rincian"]
-METRICS = ["map@10", "recall@2", "recall@10", "mrr@10", "hit@1"]
+METRICS = ["map@10", "mrr@10", "hit@1", "recall@2", "recall@10"]
 VL_METHODS = ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]
 EMBEDS = [("bge-m3", "BGE-M3"), ("multilingual-e5-large-instruct", "E5"), ("all-nusabert-large-v4", "NusaBERT")]
 RERANKERS = [("none", "None"), ("bge-reranker-v2-m3", "BGE v2 M3"), ("qwen3-reranker-0.6b", "Qwen3 0.6B")]
@@ -100,7 +100,7 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
     out.append(r"  \label{%s}" % label)
     out.append(r"  \begin{tabular}{@{}ll|rrrrr|rr@{}}")
     out.append(r"    \toprule")
-    out.append(r"    \textbf{Granularity} & \textbf{Method} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{LLM calls} & \textbf{LLM tokens} \\")
+    out.append(r"    \textbf{Granularity} & \textbf{Method} & \textbf{MAP@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{R@2} & \textbf{R@10} & \textbf{LLM calls} & \textbf{LLM tokens} \\")
     out.append(r"    \midrule")
     for gi, gran in enumerate(GRANS):
         for mi, method in enumerate(VL_METHODS):
@@ -129,7 +129,7 @@ def vec_table(qt: str, qt_name: str, label: str, out) -> None:
     out.append(r"  \label{%s}" % label)
     out.append(r"  \begin{tabular}{@{}lll|rrrrr@{}}")
     out.append(r"    \toprule")
-    out.append(r"    \textbf{Granularity} & \textbf{Embedding} & \textbf{Reranker} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} \\")
+    out.append(r"    \textbf{Granularity} & \textbf{Embedding} & \textbf{Reranker} & \textbf{MAP@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{R@2} & \textbf{R@10} \\")
     out.append(r"    \midrule")
     for gi, gran in enumerate(GRANS):
         first = True
@@ -169,7 +169,7 @@ def test_table(out) -> None:
     out.append(r"  \label{tab:appendix-test-bytype}")
     out.append(r"  \begin{tabular}{@{}ll|rrrrr|r@{}}")
     out.append(r"    \toprule")
-    out.append(r"    \textbf{Query type} & \textbf{Configuration} & \textbf{MAP@10} & \textbf{R@2} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{Latency (s)} \\")
+    out.append(r"    \textbf{Query type} & \textbf{Configuration} & \textbf{MAP@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{R@2} & \textbf{R@10} & \textbf{Latency (s)} \\")
     out.append(r"    \midrule")
     for ti, (qt, qt_name) in enumerate(TYPES):
         for ci, (cfg_name, path) in enumerate(TEST_RUNS):
@@ -217,13 +217,13 @@ def _stage2_table(caption: str, label: str, groups, out) -> None:
     out.append(r"  \label{%s}" % label)
     out.append(r"  \begin{tabular}{@{}ll|rrrr@{}}")
     out.append(r"    \toprule")
-    out.append(r"    \textbf{Step} & \textbf{Value} & \textbf{MAP@10} & \textbf{R@10} & \textbf{MRR@10} & \textbf{H@1} \\")
+    out.append(r"    \textbf{Step} & \textbf{Value} & \textbf{MAP@10} & \textbf{MRR@10} & \textbf{H@1} & \textbf{R@10} \\")
     out.append(r"    \midrule")
     for gi, (step, vals) in enumerate(groups):
         for vi, (vlabel, d) in enumerate(vals):
             sname = r"\multirow{%d}{*}{%s}" % (len(vals), step) if vi == 0 else ""
             out.append("    %s & %s & %.4f & %.4f & %.4f & %.4f \\\\" % (
-                sname, vlabel, d["map@10"], d["recall@10"], d["mrr@10"], d["hit@1"]))
+                sname, vlabel, d["map@10"], d["mrr@10"], d["hit@1"], d["recall@10"]))
         if gi < len(groups) - 1:
             out.append(r"    \midrule")
     out.append(r"    \bottomrule")
