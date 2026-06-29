@@ -24,9 +24,56 @@ from matplotlib.colors import LinearSegmentedColormap
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNS = REPO_ROOT / "data" / "eval_runs"
 
-UIBLUE = "#284887"
-UIRED = "#962D30"
-GRAY = "#8C8C8C"
+# Palette ported from the Bab 3 TikZ figures (config/diagram-style.tex) so the
+# Python plots share one visual language with the LaTeX diagrams. Role colors:
+# blue = lexical/BM25, red = LLM-driven, teal = neural encoder, slate = ink.
+C_BM25 = "#2E60A0"   # cBm25, RGB(46,96,160)
+C_LLM = "#B0343A"    # cLlm, RGB(176,52,58)
+C_ENC = "#268C6E"    # cEnc, RGB(38,140,110)
+C_PROC = "#7A5A9E"   # cProc, RGB(122,90,158)
+C_STORE = "#C48C2E"  # cStore, RGB(196,140,46)
+C_INK = "#2D3440"    # cInk, RGB(45,52,64)
+INK_SOFT = "#5A6473"  # cInk at reduced strength, for spines and secondary text
+GRID_C = "#E4E6EA"   # cInk at low opacity, for gridlines
+
+# Paradigm convention, kept from the earlier figures but recolored to the exact
+# Bab 3 hues. Vectorless is the LLM-driven paradigm, so it takes the red role.
+UIBLUE = C_BM25      # vector paradigm and lexical/ordinal blue ramps
+UIRED = C_LLM        # vectorless paradigm
+GRAY = INK_SOFT
+
+
+def tint(hex_color: str, frac: float) -> str:
+    """Mix a hex color toward white by frac, where 0 keeps it and 1 is white."""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    r, g, b = (round(c + (255 - c) * frac) for c in (r, g, b))
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+# The Bab 3 diagrams and these plots share a palette, fonts, and restraint, but
+# data plots follow their own grammar. Bars and markers use solid role-color
+# fills so magnitude reads on the strongest visual channel, with a thin white
+# separator for crisp edges.
+def bar_style(role: str) -> dict:
+    """Solid-fill bar styling with a thin white separator."""
+    return dict(color=role, edgecolor="white", linewidth=0.6)
+
+
+# Ordinal granularity ramp as a solid sequential blue, dark to light, so the
+# three levels read as one ordered scale.
+GRAN_FILL = {"pasal": 0.0, "ayat": 0.34, "rincian": 0.60}
+
+
+def gran_style(level: str, role: str = C_BM25) -> dict:
+    """Solid bar styling for one granularity level on the ordinal blue ramp."""
+    return dict(color=tint(role, GRAN_FILL[level]), edgecolor="white", linewidth=0.6)
+
+
+def pt_style(role: str, marker: str = "o") -> dict:
+    """Solid line and marker styling with a thin white marker edge."""
+    return dict(marker=marker, color=role, markerfacecolor=role,
+                markeredgecolor="white", markeredgewidth=0.8)
 
 VL_RUNS = {
     "bm25-flat": "stage1_vectorless/run23_20260520_vectorless_dev_357q_bm25_flat",
@@ -49,12 +96,23 @@ def setup_style() -> None:
         "font.family": "sans-serif",
         "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
         "font.size": 9,
+        "text.color": C_INK,
+        "axes.labelcolor": C_INK,
+        "axes.edgecolor": INK_SOFT,
+        "axes.linewidth": 0.7,
+        "xtick.color": INK_SOFT,
+        "ytick.color": INK_SOFT,
+        "xtick.labelcolor": C_INK,
+        "ytick.labelcolor": C_INK,
         "axes.spines.top": False,
         "axes.spines.right": False,
         "axes.grid": True,
-        "grid.color": "#DDDDDD",
-        "grid.linewidth": 0.5,
+        "axes.grid.axis": "y",
+        "grid.color": tint(C_INK, 0.90),
+        "grid.linewidth": 0.6,
         "axes.axisbelow": True,
+        "legend.fontsize": 8,
+        "figure.dpi": 120,
         "pdf.fonttype": 42,
     })
 
@@ -94,61 +152,96 @@ def vec_records(gran: str, emb: str, rer: str) -> list[dict]:
 
 
 def plot_granularity(out: Path, fmt: str = "pdf") -> None:
-    """Grouped bars, MAP@10 by vectorless method and granularity."""
-    methods = ["bm25-flat", "bm25-tree", "hybrid-flat", "hybrid-tree", "llm-flat", "llm-tree"]
-    # Extra horizontal gap between the lexical, hybrid, and LLM-based pairs
-    # so the three family bands are visible in the figure itself.
-    method_x = [0.0, 1.0, 2.45, 3.45, 4.9, 5.9]
-    grans = ["pasal", "ayat", "rincian"]
-    colors = {"pasal": UIBLUE, "ayat": "#6E87B7", "rincian": "#C9D3E6"}
+    """Line plots, MAP@10 by granularity for the BM25 baseline and vectorless methods.
 
-    fig, ax = plt.subplots(figsize=(6.3, 3.1))
-    width = 0.26
-    for gi, gran in enumerate(grans):
-        vals = [mean(vl_records(m, gran), "map@10") for m in methods]
-        xs = [x + (gi - 1) * width for x in method_x]
-        bars = ax.bar(xs, vals, width=width, color=colors[gran], label=gran.capitalize(),
-                      edgecolor="white", linewidth=0.4)
-        ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
-    ax.set_xticks(method_x)
-    ax.set_xticklabels(methods)
-    ax.set_ylabel("MAP@10")
-    ax.set_ylim(0, 1.12)
-    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
-    fig.tight_layout()
+    The methods come in a flat and a hierarchical form, so the figure splits into
+    two panels by form, each comparing the families across granularity, the
+    bm25-flat lexical baseline in gray, the hybrid methods in red, and the LLM-based
+    methods in violet. BM25 is the baseline, so its single carried-forward
+    configuration, bm25-flat, is shown as the reference floor in both panels rather
+    than its per-form variant. Every family peaks at pasal and declines toward
+    rincian, with the gray baseline falling the most steeply.
+    """
+    families = [
+        ("bm25", "BM25 baseline", INK_SOFT),
+        ("hybrid", "Hybrid", C_LLM),
+        ("llm", "LLM-based", C_PROC),
+    ]
+    forms = [("flat", "Flat"), ("tree", "Hierarchical (tree)")]
+    grans = ["pasal", "ayat", "rincian"]
+    x = list(range(len(grans)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(6.8, 3.4), sharey=True)
+    for ax, (form, ftitle) in zip(axes, forms):
+        for fam, flabel, color in families:
+            # BM25 is the baseline, shown as the single bm25-flat reference in both panels.
+            method = "bm25-flat" if fam == "bm25" else f"{fam}-{form}"
+            vals = [mean(vl_records(method, g), "map@10") for g in grans]
+            ax.plot(x, vals, linewidth=1.8, markersize=6, label=flabel, **pt_style(color, "o"))
+        ax.set_xticks(x)
+        ax.set_xticklabels([g.capitalize() for g in grans])
+        ax.set_xlabel("Granularity")
+        ax.set_title(ftitle, fontsize=9, color=C_INK)
+        ax.set_xlim(-0.25, 2.25)
+    axes[0].set_ylabel("MAP@10")
+    axes[0].set_ylim(0.30, 0.97)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, ncol=3, loc="upper center",
+               bbox_to_anchor=(0.5, 1.03), fontsize=8)
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
     fig.savefig(out / f"vl-granularity.{fmt}")
     plt.close(fig)
 
 
 def plot_bytype(out: Path, fmt: str = "pdf") -> None:
-    """Grouped bars, MAP@10 by query type for the leading config of each paradigm."""
+    """Dumbbell plot, MAP@10 by query type for the leading config of each paradigm.
+
+    Each query type is one row with the two paradigms as connected dots, so the
+    complementary pattern is read directly. The paradigms tie on factual queries,
+    the vector dot leads on paraphrased, and the vectorless dot leads on multihop,
+    a crossing that grouped bars of these near-equal values would flatten.
+    """
     configs = [
-        ("Vectorless\n(hybrid-tree)", lambda: vl_records("hybrid-tree", "pasal")),
-        ("Vector\n(BGE-M3 + BGE v2 M3)", lambda: vec_records("pasal", "bge-m3", "bge-reranker-v2-m3")),
+        ("Vectorless (hybrid-tree)", lambda: vl_records("hybrid-tree", "pasal"), UIRED, 9),
+        ("Vector (BGE-M3 + BGE v2 M3)", lambda: vec_records("pasal", "bge-m3", "bge-reranker-v2-m3"), UIBLUE, -15),
     ]
     types = ["factual", "paraphrased", "multihop"]
-    colors = {"factual": UIBLUE, "paraphrased": GRAY, "multihop": UIRED}
-    config_x = [0.0, 1.25]
+    ys = [2, 1, 0]
 
-    fig, ax = plt.subplots(figsize=(6.3, 3.1))
-    width = 0.32
-    for ti, qt in enumerate(types):
-        vals = []
-        for _, loader in configs:
-            rows = [r for r in loader() if r.get("query_type") == qt]
-            vals.append(mean(rows, "map@10"))
-        xs = [x + (ti - 1) * width for x in config_x]
-        bars = ax.bar(xs, vals, width=width, color=colors[qt], label=qt.capitalize(),
-                      edgecolor="white", linewidth=0.4)
-        ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
-    ax.set_xticks(config_x)
-    ax.set_xticklabels([c for c, _ in configs])
-    ax.set_xlim(-0.7, 1.95)
-    ax.set_ylabel("MAP@10")
-    ax.set_ylim(0, 1.12)
-    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
+    fig, ax = plt.subplots(figsize=(6.3, 2.9))
+    ax.grid(axis="x")
+    ax.grid(axis="y", visible=False)
+    for y, qt in zip(ys, types):
+        vl_v, vec_v = (mean([r for r in loader() if r.get("query_type") == qt], "map@10")
+                       for _, loader, _, _ in configs)
+        ax.plot([vl_v, vec_v], [y, y], color=tint(C_INK, 0.65), linewidth=1.6, zorder=1)
+        ax.scatter(vl_v, y, s=80, color=UIRED, edgecolor="white", linewidth=0.9, zorder=3)
+        ax.scatter(vec_v, y, s=80, color=UIBLUE, edgecolor="white", linewidth=0.9, zorder=3)
+        delta = vl_v - vec_v
+        if abs(delta) < 0.005:
+            # Near-tie, the dots overlap, so one centered label avoids duplication.
+            ax.annotate(f"{vl_v:.3f}", ((vl_v + vec_v) / 2, y), textcoords="offset points",
+                        xytext=(0, 10), ha="center", fontsize=7.5, color=C_INK)
+            dcolor, dtext = INK_SOFT, "tie"
+        else:
+            ax.annotate(f"{vl_v:.3f}", (vl_v, y), textcoords="offset points", xytext=(0, 9),
+                        ha="center", fontsize=7.5, color=UIRED)
+            ax.annotate(f"{vec_v:.3f}", (vec_v, y), textcoords="offset points", xytext=(0, -15),
+                        ha="center", fontsize=7.5, color=UIBLUE)
+            dcolor = UIRED if delta > 0 else UIBLUE
+            dtext = f"{delta:+.3f}"
+        ax.annotate(dtext, (max(vl_v, vec_v), y), textcoords="offset points", xytext=(12, 0),
+                    ha="left", va="center", fontsize=8, color=dcolor, fontweight="bold")
+    ax.set_yticks(ys)
+    ax.set_yticklabels([t.capitalize() for t in types])
+    ax.set_ylabel("Query type")
+    ax.set_ylim(-0.6, 2.7)
+    ax.set_xlim(0.80, 1.0)
+    ax.set_xlabel("MAP@10")
+    handles = [plt.Line2D([0], [0], marker="o", linestyle="none", markersize=8, color=c,
+                          markeredgecolor="white", label=lbl) for lbl, _, c, _ in configs]
+    ax.legend(handles=handles, frameon=False, ncol=2, loc="lower center",
+              bbox_to_anchor=(0.5, 1.0), fontsize=8)
     fig.tight_layout()
     fig.savefig(out / f"bytype.{fmt}")
     plt.close(fig)
@@ -160,18 +253,18 @@ def plot_cost(out: Path, fmt: str = "pdf") -> None:
     Effectiveness shares the vertical axis across both panels. The left panel
     plots mean per-query latency on a log axis, the right panel plots mean
     per-query LLM tokens on a symlog axis so the token-free configurations sit
-    honestly at zero. Both paradigms are differentiated by method family using
-    marker shape: vectorless by BM25 / Hybrid / LLM-based (v, o, P) and vector
-    by reranker class (D, s, ^), since the reranker determines vector cost just
-    as the method family determines vectorless cost. Color separates paradigms
-    (red = vectorless, blue = vector). All six vectorless methods are labeled
-    in the latency panel; only the four token-spending methods are labeled in
-    the token panel where they spread out horizontally.
+    honestly at zero. Marker shape separates the groups, the lexical baseline by
+    BM25 (v), the vectorless paradigm by Hybrid (o) and LLM-based (P), and the
+    vector paradigm by reranker class (D, s, ^). Color separates the three,
+    gray for the lexical baseline, red for vectorless, blue for vector, matching
+    the cost tiers of the text. The BM25 baseline and the four vectorless methods
+    are labeled in the latency panel, and only the four token-spending vectorless
+    methods are labeled in the token panel where they spread out horizontally.
     """
-    vl_families = [
-        (["bm25-flat", "bm25-tree"], "v", "Vectorless (BM25)"),
-        (["hybrid-flat", "hybrid-tree"], "o", "Vectorless (Hybrid)"),
-        (["llm-flat", "llm-tree"], "P", "Vectorless (LLM-based)"),
+    point_groups = [
+        (["bm25-flat", "bm25-tree"], "v", INK_SOFT, "Lexical baseline (BM25)"),
+        (["hybrid-flat", "hybrid-tree"], "o", UIRED, "Vectorless (Hybrid)"),
+        (["llm-flat", "llm-tree"], "P", UIRED, "Vectorless (LLM-based)"),
     ]
     embeds = ["bge-m3", "multilingual-e5-large-instruct", "all-nusabert-large-v4"]
     reranker_classes = [
@@ -200,25 +293,25 @@ def plot_cost(out: Path, fmt: str = "pdf") -> None:
 
     def draw(ax, xkey, labels=None):
         """Plot one cost-versus-MAP@10 panel on ax, using xkey as the x-axis metric."""
-        for methods, marker, legend_label in vl_families:
+        for methods, marker, color, legend_label in point_groups:
             first = True
             for method in methods:
                 rows = vl_records(method, "pasal")
                 x, y = mean(rows, xkey), mean(rows, "map@10")
-                ax.scatter(x, y, s=52, color=UIRED, marker=marker, edgecolor="white",
-                           linewidth=0.6, zorder=3, label=legend_label if first else None)
+                ax.scatter(x, y, s=58, color=color, marker=marker, edgecolor="white",
+                           linewidth=0.8, zorder=3, label=legend_label if first else None)
                 first = False
                 if labels and method in labels:
                     dx, dy, ha = labels[method]
                     ax.annotate(method, (x, y), textcoords="offset points", xytext=(dx, dy),
-                                ha=ha, fontsize=7.5, color="#333333")
+                                ha=ha, fontsize=7.5, color=C_INK)
         for rer_key, rer_label, marker in reranker_classes:
             first = True
             for emb in embeds:
                 rows = vec_records("pasal", emb, rer_key)
-                ax.scatter(mean(rows, xkey), mean(rows, "map@10"), s=52,
+                ax.scatter(mean(rows, xkey), mean(rows, "map@10"), s=58,
                            color=UIBLUE, marker=marker, edgecolor="white",
-                           linewidth=0.6, zorder=3, label=rer_label if first else None)
+                           linewidth=0.8, zorder=3, label=rer_label if first else None)
                 first = False
 
     draw(axL, "elapsed_s", labels=latency_labels)
@@ -228,7 +321,7 @@ def plot_cost(out: Path, fmt: str = "pdf") -> None:
     axL.set_xticks([0.1, 1, 10])
     axL.set_xticklabels(["0.1", "1", "10"])
     axL.set_xlim(0.05, 40)
-    axL.set_xlabel("Mean latency per query (s, log scale)")
+    axL.set_xlabel("Mean latency per query (seconds, log scale)")
     axL.set_ylabel("MAP@10")
     axL.set_ylim(0.5, 0.95)
 
@@ -236,7 +329,7 @@ def plot_cost(out: Path, fmt: str = "pdf") -> None:
     axR.set_xticks([0, 1e4, 1e5, 1e6])
     axR.set_xticklabels(["0", "10k", "100k", "1M"])
     axR.set_xlim(-300, 3e6)
-    axR.set_xlabel("Mean LLM tokens per query")
+    axR.set_xlabel("Mean LLM tokens per query (symlog; 0 = no LLM call)")
 
     handles, labels = axR.get_legend_handles_labels()
     axR.legend(handles, labels, frameon=False, loc="lower right", fontsize=7)
@@ -252,7 +345,7 @@ def plot_tuning(out: Path, fmt: str = "pdf") -> None:
     tuning, main-model swap, and query expansion. A rejected step reuses the
     previous run, so the line tracks the value actually carried forward.
     """
-    stages = ["Baseline", "Hyperparameters", "Model swap", "Query expansion"]
+    stages = ["Default", "Hyperparameter\ntuning", "Model swap", "Query expansion"]
     vl_runs = [
         "stage2_vectorless/run50_bm25topk10",
         "stage2_vectorless/run51_docpick5",
@@ -272,10 +365,10 @@ def plot_tuning(out: Path, fmt: str = "pdf") -> None:
 
     x = list(range(len(stages)))
     fig, ax = plt.subplots(figsize=(6.3, 3.3))
-    ax.plot(x, vl_vals, marker="o", color=UIRED, linewidth=2,
-            label="Vectorless (hybrid-tree)")
-    ax.plot(x, vec_vals, marker="s", color=UIBLUE, linewidth=2,
-            label="Vector (BGE-M3 + BGE v2 M3)")
+    ax.plot(x, vl_vals, linewidth=1.8, markersize=7, label="Vectorless (hybrid-tree)",
+            **pt_style(UIRED, "o"))
+    ax.plot(x, vec_vals, linewidth=1.8, markersize=7, label="Vector (BGE-M3 + BGE v2 M3)",
+            **pt_style(UIBLUE, "s"))
     for xi, v in zip(x, vl_vals):
         ax.annotate(f"{v:.4f}", (xi, v), textcoords="offset points",
                     xytext=(0, 9), ha="center", fontsize=8, color=UIRED)
@@ -284,6 +377,7 @@ def plot_tuning(out: Path, fmt: str = "pdf") -> None:
                     xytext=(0, -15), ha="center", fontsize=8, color=UIBLUE)
     ax.set_xticks(x)
     ax.set_xticklabels(stages)
+    ax.set_xlabel("Improvement step")
     ax.set_ylabel("MAP@10")
     ax.set_ylim(0.84, 0.98)
     ax.set_xlim(-0.35, len(stages) - 0.65)
@@ -308,15 +402,15 @@ def plot_emb_reranker_heatmap(out: Path, fmt: str = "pdf") -> None:
     ]
     rerankers = [
         ("none", "No reranker"),
-        ("qwen3-reranker-0.6b", "Qwen3-Reranker\n0.6B"),
-        ("bge-reranker-v2-m3", "BGE-Reranker\nv2-M3"),
+        ("qwen3-reranker-0.6b", "Qwen3 0.6B"),
+        ("bge-reranker-v2-m3", "BGE v2 M3"),
     ]
     grid = [[mean(vec_records("pasal", emb, rer), "map@10") for rer, _ in rerankers]
             for emb, _ in embeds]
     flat = [v for row in grid for v in row]
 
     # Light to UIBLUE ramp, the same blue family the granularity bars use.
-    cmap = LinearSegmentedColormap.from_list("uiblue", ["#EEF3FA", "#7E97C4", UIBLUE])
+    cmap = LinearSegmentedColormap.from_list("uiblue", [tint(UIBLUE, 0.93), tint(UIBLUE, 0.50), UIBLUE])
 
     fig, ax = plt.subplots(figsize=(5.8, 3.4))
     ax.grid(False)
@@ -341,39 +435,268 @@ def plot_emb_reranker_heatmap(out: Path, fmt: str = "pdf") -> None:
 
 
 def plot_vec_granularity(out: Path, fmt: str = "pdf") -> None:
-    """Grouped bars, MAP@10 by embedding and granularity at the BGE reranker.
+    """Line plot, MAP@10 by granularity for each embedding at the BGE reranker.
 
     The reranker is fixed to BGE-Reranker-v2-M3, the strongest of the three, so
-    the figure isolates the granularity effect for each embedding. Pasal leads at
-    every embedding, which mirrors the vectorless side and is why the comparison
-    centers on the pasal level.
+    the figure isolates the granularity effect for each embedding. Every embedding
+    peaks at pasal and declines through ayat to rincian, mirroring the vectorless
+    side and motivating the pasal-level comparison. A line encodes the ordered
+    granularity axis more directly than grouped bars.
     """
     embeds = [
-        ("bge-m3", "BGE-M3"),
-        ("multilingual-e5-large-instruct", "Multilingual E5"),
-        ("all-nusabert-large-v4", "NusaBERT"),
+        ("bge-m3", "BGE-M3", C_BM25, "o"),
+        ("multilingual-e5-large-instruct", "Multilingual E5", C_ENC, "s"),
+        ("all-nusabert-large-v4", "NusaBERT", C_PROC, "^"),
     ]
     reranker = "bge-reranker-v2-m3"
     grans = ["pasal", "ayat", "rincian"]
-    colors = {"pasal": UIBLUE, "ayat": "#6E87B7", "rincian": "#C9D3E6"}
+    x = list(range(len(grans)))
 
-    emb_x = [0.0, 1.0, 2.0]
-    fig, ax = plt.subplots(figsize=(6.3, 3.1))
-    width = 0.26
-    for gi, gran in enumerate(grans):
-        vals = [mean(vec_records(gran, emb, reranker), "map@10") for emb, _ in embeds]
-        xs = [x + (gi - 1) * width for x in emb_x]
-        bars = ax.bar(xs, vals, width=width, color=colors[gran], label=gran.capitalize(),
-                      edgecolor="white", linewidth=0.4)
-        ax.bar_label(bars, fmt="%.2f", rotation=90, padding=2, fontsize=7, color="#444444")
-    ax.set_xticks(emb_x)
-    ax.set_xticklabels([lab for _, lab in embeds])
+    fig, ax = plt.subplots(figsize=(6.0, 3.3))
+    for key, label, color, marker in embeds:
+        vals = [mean(vec_records(g, key, reranker), "map@10") for g in grans]
+        ax.plot(x, vals, linewidth=1.8, markersize=7, label=label, **pt_style(color, marker))
+    ax.set_xticks(x)
+    ax.set_xticklabels([g.capitalize() for g in grans])
+    ax.set_xlabel("Granularity")
     ax.set_ylabel("MAP@10")
-    ax.set_ylim(0, 1.08)
-    ax.set_yticks([0.0, 0.2, 0.4, 0.6, 0.8, 1.0])
-    ax.legend(frameon=False, ncol=3, loc="upper center", bbox_to_anchor=(0.5, 1.14))
+    ax.set_xlim(-0.25, 2.25)
+    ax.set_ylim(0.45, 0.95)
+    ax.legend(frameon=False, loc="upper right", fontsize=8, title="Embedding", title_fontsize=8)
     fig.tight_layout()
     fig.savefig(out / f"vec-granularity.{fmt}")
+    plt.close(fig)
+
+
+STAGE3 = "stage3_test"
+TEST_VL = f"{STAGE3}/rq4_test_hybrid_tree/records/hybrid-tree__pasal.jsonl"
+TEST_VEC = f"{STAGE3}/rq4_test_v2m3_qe/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl"
+TEST_BM25 = f"{STAGE3}/test_bm25/records/bm25-flat__pasal.jsonl"
+
+
+def load_json(rel: str) -> dict:
+    """Load a JSON file relative to the eval runs directory."""
+    with open(RUNS / rel, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def plot_hypothesis_forest(out: Path, fmt: str = "pdf") -> None:
+    """Forest plot of the eight held-out hypothesis tests.
+
+    Each row shows the effect of one pre-registered comparison as the metric
+    difference with its 95 percent bootstrap interval, with the Holm-adjusted
+    decision encoded by color and fill. Hypotheses 1 to 7 are MAP@10 differences
+    and Hypothesis 8 is the multihop R@2 difference of differences, all on a
+    metric-probability scale. Supported tests are blue, the refuted Hypothesis 4
+    is red, and the unsupported Hypothesis 6 is hollow gray.
+    """
+    labels = {
+        1: "Vectorless vs BM25", 2: "Vector vs BM25", 3: "Reranker vs none",
+        4: "Specialized vs multilingual", 5: "Improved vs default (vectorless)",
+        6: "Improved vs default (vector)", 7: "Vectorless vs vector",
+        8: "Multihop margin (R@2)",
+    }
+    family = load_json(f"{STAGE3}/hypotheses/_family.json")["holm"]
+    rows = []
+    for i in range(1, 9):
+        h = load_json(f"{STAGE3}/hypotheses/H{i}.json")
+        ci = h["bootstrap_ci"]
+        if i == 8:
+            delta, eff = h["contrast"], f"$\\delta$={h['cliffs_delta']['delta']:.2f}"
+        else:
+            delta, eff = h["mean_diff"], f"d={h['cohens_d']['d']:.2f}"
+        reject = family[f"H{i}"]["reject"]
+        if not reject:
+            outcome = "Not supported"
+        elif delta > 0:
+            outcome = "Supported"
+        else:
+            outcome = "Refuted"
+        rows.append((i, delta, ci["low"], ci["high"], eff, outcome))
+
+    style = {
+        "Supported": dict(color=C_BM25, mfc=C_BM25),
+        "Refuted": dict(color=C_LLM, mfc=C_LLM),
+        "Not supported": dict(color=INK_SOFT, mfc="white"),
+    }
+    fig, ax = plt.subplots(figsize=(6.6, 3.8))
+    ax.grid(axis="x")
+    ax.grid(axis="y", visible=False)
+    ax.axvline(0, color=INK_SOFT, linewidth=0.8, linestyle=(0, (4, 3)), zorder=1)
+    ys = list(range(len(rows)))[::-1]
+    # H1 to H7 compare MAP@10; H8 is an R@2 difference of differences. Separate it
+    # so the shared x-axis is not read as one metric.
+    ax.axhline(0.5, color=INK_SOFT, linewidth=0.7, linestyle=(0, (2, 2)), zorder=1)
+    ax.annotate("MAP@10", xy=(-0.2, 7.3), va="center", ha="left", fontsize=7,
+                color=INK_SOFT, style="italic")
+    ax.annotate("R@2", xy=(-0.2, 0.32), va="center", ha="left", fontsize=7,
+                color=INK_SOFT, style="italic")
+    for y, (i, delta, lo, hi, eff, outcome) in zip(ys, rows):
+        st = style[outcome]
+        ax.plot([lo, hi], [y, y], color=st["color"], linewidth=1.6, zorder=2,
+                solid_capstyle="round")
+        ax.plot([delta], [y], marker="o", markersize=7, color=st["color"],
+                markerfacecolor=st["mfc"], markeredgewidth=1.4, zorder=3)
+        ax.annotate(eff, (hi, y), textcoords="offset points", xytext=(8, 0),
+                    va="center", ha="left", fontsize=7.5, color=C_INK)
+    ax.set_yticks(ys)
+    ax.set_yticklabels([f"H{i}  {labels[i]}" for i, *_ in rows])
+    ax.set_xlabel("Difference in metric, 95% CI (MAP@10; H8 in R@2)")
+    ax.set_xlim(-0.2, 0.42)
+    handles = [plt.Line2D([0], [0], marker="o", linestyle="none", markersize=7,
+                          color=st["color"], markerfacecolor=st["mfc"],
+                          markeredgewidth=1.4, label=name)
+               for name, st in style.items()]
+    ax.legend(handles=handles, frameon=False, loc="lower right", fontsize=7.5,
+              title="Outcome", title_fontsize=7.5)
+    fig.tight_layout()
+    fig.savefig(out / f"hypothesis-forest.{fmt}")
+    plt.close(fig)
+
+
+def plot_rank_distribution(out: Path, fmt: str = "pdf") -> None:
+    """Cumulative Hit@k curve of the gold node on the test partition.
+
+    For each rank cutoff k, the curve gives the fraction of queries whose first
+    relevant node falls within the top k. The two improved configurations start
+    apart at k equals one and converge to the same value by k equals ten, so the
+    vectorless lead is one of ordering at the top of the ranking rather than of
+    coverage within the top ten. BM25 trails throughout and tops out lower.
+    """
+    series = [
+        ("Vectorless (improved hybrid-tree)", TEST_VL, UIRED, "o"),
+        ("Vector (improved BGE-M3 + reranker)", TEST_VEC, UIBLUE, "s"),
+        ("BM25 baseline", TEST_BM25, INK_SOFT, "^"),
+    ]
+    ks = list(range(1, 11))
+
+    fig, ax = plt.subplots(figsize=(6.3, 3.4))
+    hit1 = {}
+    for label, path, color, marker in series:
+        rows = load_records(path)
+        n = len(rows)
+        vals = [sum(1 for r in rows if (r.get("first_relevant_rank") or 99) <= k) / n
+                for k in ks]
+        hit1[label] = vals[0]
+        ax.plot(ks, vals, linewidth=1.8, markersize=6, label=label, **pt_style(color, marker))
+    # The two paradigms converge by k=10, so annotate the k=1 gap where they differ.
+    top = hit1["Vectorless (improved hybrid-tree)"]
+    bot = hit1["Vector (improved BGE-M3 + reranker)"]
+    ax.annotate("", xy=(1, top), xytext=(1, bot),
+                arrowprops=dict(arrowstyle="<->", color=C_INK, lw=0.8))
+    ax.annotate(f"+{top - bot:.3f} at k=1", xy=(1, (top + bot) / 2),
+                textcoords="offset points", xytext=(8, 0), va="center", ha="left",
+                fontsize=7.5, color=C_INK)
+    ax.set_xticks(ks)
+    ax.set_xlabel("Rank cutoff $k$")
+    ax.set_ylabel("Hit@$k$ (fraction of queries)")
+    ax.set_xlim(0.7, 10.3)
+    ax.set_ylim(0.55, 1.0)
+    ax.legend(frameon=False, loc="lower right", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / f"rank-distribution.{fmt}")
+    plt.close(fig)
+
+
+def plot_multihop_breakdown(out: Path, fmt: str = "pdf") -> None:
+    """Stacked bars of the multihop outcome breakdown on the test partition.
+
+    The 78 multihop test queries are split into both anchors placed in the top
+    two, both anchors retrieved within the top ten but ranked below the top two,
+    and at least one anchor missed. The vector gap is mostly the middle band,
+    where both provisions are found but not ranked together, which isolates the
+    advantage as ordering rather than retrieval.
+    """
+    mc = load_json(f"{STAGE3}/multihop_contrast.json")
+    n = mc["n_subset"]
+    fb = mc["failure_breakdown"]
+
+    def split(side: dict) -> list[int]:
+        success = n - side["failures"]
+        mid = side["all_anchors_retrieved"]
+        missed = side["one_anchor_missing"] + side["all_anchors_missing"]
+        return [success, mid, missed]
+
+    rows = [("Vectorless\n(improved hybrid-tree)", split(fb["a"])),
+            ("Vector\n(improved BGE-M3 + reranker)", split(fb["b"]))]
+    seg_labels = ["Both in top 2", "Both found, below top 2", "At least one missing from top 10"]
+    seg_colors = [C_ENC, C_STORE, C_LLM]
+
+    fig, ax = plt.subplots(figsize=(6.6, 2.8))
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x")
+    ys = [1, 0]
+    for yi, (_, parts) in zip(ys, rows):
+        left = 0
+        for val, color in zip(parts, seg_colors):
+            if val > 0:
+                ax.barh(yi, val, left=left, height=0.62, **bar_style(color))
+                ax.annotate(f"{val}\n{val / n * 100:.0f}%", (left + val / 2, yi),
+                            ha="center", va="center", fontsize=8, color="white",
+                            fontweight="bold", linespacing=0.95)
+            left += val
+        if parts[2] == 0:
+            ax.annotate("0 missing", (n, yi), textcoords="offset points", xytext=(4, 0),
+                        ha="left", va="center", fontsize=7.5, color=INK_SOFT)
+    ax.set_yticks(ys)
+    ax.set_yticklabels([name for name, _ in rows])
+    ax.set_xlabel(f"Multihop test queries (n = {n})")
+    ax.set_xlim(0, n * 1.12)
+    ax.set_ylim(-0.6, 1.6)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in seg_colors]
+    ax.legend(handles, seg_labels, frameon=False, ncol=3, loc="upper center",
+              bbox_to_anchor=(0.5, 1.22), fontsize=7.5)
+    fig.tight_layout()
+    fig.savefig(out / f"multihop-breakdown.{fmt}")
+    plt.close(fig)
+
+
+def plot_tree_funnel(out: Path, fmt: str = "pdf") -> None:
+    """Slope chart of the two-stage decomposition for the hierarchical methods.
+
+    Each method is traced across three quantities, how often the gold document
+    survived selection, how often the gold node was then ranked first inside that
+    document, and the final H@1 after the per-document lists were merged. The
+    second value is conditional on the document being found, matching the reported
+    table, so the drop to the final value reflects the cross-document merge. The
+    methods separate at the within-document step rather than at document selection.
+    """
+    # dy offsets keep the two near-identical vectorless lines from colliding,
+    # with hybrid-tree labeled above its markers and llm-tree below.
+    methods = [
+        ("bm25-tree", "bm25-tree", INK_SOFT, "o", -16),
+        ("hybrid-tree", "hybrid-tree", C_LLM, "o", 9),
+        ("llm-tree", "llm-tree", C_PROC, "s", -16),
+    ]
+    stages = ["Correct document\nretrieved", "Correct node first\nin that document",
+              "Correct node first\noverall (H@1)"]
+
+    def decomp(method: str) -> list[float]:
+        rows = vl_records(method, "pasal")
+        n = len(rows)
+        doc = sum(r.get("doc_pick_hit") or 0 for r in rows) / n
+        found = [r for r in rows if (r.get("doc_pick_hit") or 0) == 1]
+        within = sum(r.get("within_doc_hit@1") or 0 for r in found) / len(found)
+        h1 = sum(r.get("hit@1") or 0 for r in rows) / n
+        return [doc, within, h1]
+
+    x = list(range(len(stages)))
+    fig, ax = plt.subplots(figsize=(6.3, 3.5))
+    for method, label, color, marker, dy in methods:
+        vals = decomp(method)
+        ax.plot(x, vals, linewidth=1.8, markersize=7, label=label, zorder=3,
+                **pt_style(color, marker))
+        for xi, v in zip(x, vals):
+            ax.annotate(f"{v:.3f}", (xi, v), textcoords="offset points",
+                        xytext=(0, dy), ha="center", fontsize=7.5, color=color)
+    ax.set_xticks(x)
+    ax.set_xticklabels(stages)
+    ax.set_xlim(-0.35, len(stages) - 0.65)
+    ax.set_ylabel("Rate")
+    ax.set_ylim(0.45, 1.02)
+    ax.legend(frameon=False, loc="lower left", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out / f"tree-funnel.{fmt}")
     plt.close(fig)
 
 
@@ -397,7 +720,11 @@ def main() -> int:
     plot_tuning(out)
     plot_emb_reranker_heatmap(out)
     plot_vec_granularity(out)
-    print(f"Wrote 6 figures to {out}")
+    plot_hypothesis_forest(out)
+    plot_rank_distribution(out)
+    plot_multihop_breakdown(out)
+    plot_tree_funnel(out)
+    print(f"Wrote 10 figures to {out}")
     if args.svg_dir:
         svg_dir = Path(args.svg_dir)
         svg_dir.mkdir(parents=True, exist_ok=True)
