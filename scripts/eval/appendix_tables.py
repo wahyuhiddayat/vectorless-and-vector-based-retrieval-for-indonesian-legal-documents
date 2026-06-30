@@ -149,7 +149,7 @@ def vec_table(qt: str, qt_name: str, label: str, out) -> None:
 
 TEST_RUNS = [
     ("Vectorless", "stage3_test/rq4_test_hybrid_tree/records/hybrid-tree__pasal.jsonl"),
-    ("Vector", "stage3_test/rq4_test_v2m3_qe/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl"),
+    ("Vector-based", "stage3_test/rq4_test_v2m3_qe/records/vector-dense__pasal__bge-m3__bge-reranker-v2-m3.jsonl"),
 ]
 
 
