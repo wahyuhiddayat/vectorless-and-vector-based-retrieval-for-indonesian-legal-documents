@@ -108,7 +108,7 @@ def vl_table(qt: str, qt_name: str, label: str, out) -> None:
             vals = [cell(rows, qt, m) for m in METRICS]
             calls = cell(rows, qt, "llm_calls")
             tokens = cell(rows, qt, "total_tokens")
-            gname = r"\multirow{6}{*}{%s}" % gran.capitalize() if mi == 0 else ""
+            gname = r"\multirow{6}{*}{\textit{%s}}" % gran.capitalize() if mi == 0 else ""
             out.append("    %s & %s & %s & %.1f & %s \\\\" % (gname, method, fmt(vals), calls, fmt_int(tokens)))
         if gi < len(GRANS) - 1:
             out.append(r"    \midrule")
@@ -136,7 +136,7 @@ def vec_table(qt: str, qt_name: str, label: str, out) -> None:
         for emb_key, emb_name in EMBEDS:
             for rer_key, rer_name in RERANKERS:
                 vals = [cell(vec_rows(gran, emb_key, rer_key), qt, m) for m in METRICS]
-                gname = r"\multirow{9}{*}{%s}" % gran.capitalize() if first else ""
+                gname = r"\multirow{9}{*}{\textit{%s}}" % gran.capitalize() if first else ""
                 out.append("    %s & %s & %s & %s \\\\" % (gname, emb_name, rer_name, fmt(vals)))
                 first = False
         if gi < len(GRANS) - 1:
