@@ -283,7 +283,7 @@ def effect_size_table(out) -> None:
     out.append(r"  \caption{Effect sizes for the test-partition comparison, vectorless minus vector.}")
     out.append(r"  \label{tab:appendix-effect-size}")
     out.append(r"  \setlength{\tabcolsep}{8pt}")
-    out.append(r"  \begin{tabular}{@{}lrrrc@{}}")
+    out.append(r"  \begin{tabular}{@{}lrrrl@{}}")
     out.append(r"    \toprule")
     out.append(r"    \textbf{Metric} & \textbf{Difference} & \textbf{p-value} & \textbf{Cohen's $d_z$} & \textbf{Magnitude} \\")
     out.append(r"    \midrule")
